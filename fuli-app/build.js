@@ -1,6 +1,7 @@
 const { execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 const rootDir = path.resolve(__dirname, '..');
 const appDir = __dirname;

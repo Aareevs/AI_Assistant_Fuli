@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage, systemPreferences } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -126,9 +126,15 @@ function createWindow() {
   }
 
   // Auto-dismiss on click outside (Spotlight behavior) when idle
+  let hasBeenFocused = false;
+  mainWindow.on('focus', () => {
+    hasBeenFocused = true;
+  });
+
   mainWindow.on('blur', () => {
-    if (!isTaskRunning && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-      mainWindow.hide();
+    if (hasBeenFocused && !isTaskRunning && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+      hasBeenFocused = false;
+      hideWindow();
     }
   });
 
