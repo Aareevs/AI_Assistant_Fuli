@@ -5,6 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "build": "node build.js",
     "test:planner": "node test-planner.js"
   },
   "dependencies": {
@@ -12,6 +13,7 @@
     "playwright": "^1.50.1"
   },
   "devDependencies": {
+    "@electron/packager": "^20.3.0",
     "electron": "^35.7.5"
   }
 }

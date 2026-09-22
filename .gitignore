@@ -20,3 +20,6 @@ __pycache__/
 
 # IDE configuration
 .vscode/
+
+# Build Output
+dist/

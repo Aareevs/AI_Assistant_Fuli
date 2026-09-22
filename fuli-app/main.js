@@ -1,6 +1,22 @@
 const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+const os = require('os');
+const fs = require('fs');
+
+const envCandidates = [
+  path.resolve(__dirname, '../.env'),
+  path.resolve(__dirname, '../../../../.env'),
+  path.join(os.homedir(), 'VS-Code/AI_Assistant_Fuli/.env'),
+  path.join(os.homedir(), '.fuli/.env'),
+  path.join(os.homedir(), '.env')
+];
+
+for (const envPath of envCandidates) {
+  if (fs.existsSync(envPath)) {
+    require('dotenv').config({ path: envPath });
+    break;
+  }
+}
 
 const { actionExecutor } = require('./automation/executor');
 
@@ -132,7 +148,7 @@ app.whenReady().then(() => {
   showWindow();
 
   app.on('activate', () => {
-    toggleWindow();
+    showWindow();
   });
 });
 

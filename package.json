@@ -5,6 +5,7 @@
   "scripts": {
     "app": "cd fuli-app && bun run start",
     "app:npm": "cd fuli-app && npm start",
+    "build:app": "node fuli-app/build.js",
     "test:planner": "cd fuli-app && node test-planner.js",
     "test:browser": "cd fuli-app && node test-browser.js",
     "test:executor": "cd fuli-app && node test-executor.js"
