@@ -3,6 +3,10 @@
 env/
 venv/
 
+# Node Dependencies
+node_modules/
+fuli-app/node_modules/
+
 # Environment Variables & Secrets
 .env
 

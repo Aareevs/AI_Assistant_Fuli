@@ -4,6 +4,7 @@ Fuli is an agile, sharp, and intelligent AI voice assistant split into two coope
 
 | Component | Command | What it is |
 | --- | --- | --- |
+| **Desktop App** | `npm run app` | A floating Raycast/Vy-style desktop operator app with autonomous browser navigation, screen execution, and glassmorphic UI. |
 | **MCP Server** | `uv run fuli` | A [FastMCP](https://github.com/jlowin/fastmcp) server exposing tools (live global news, financial briefings, browser monitors, system utilities) over SSE transport. |
 | **Voice Agent** | `uv run fuli_voice` | A [LiveKit Agents](https://github.com/livekit/agents) voice pipeline that listens to your speech, reasons with an LLM (Gemini 2.5 Flash / OpenAI), and speaks back with a crisp, natural female voice (OpenAI Nova / Sarvam Kavya) while invoking tools in real time. |
 
@@ -40,9 +41,15 @@ The voice agent connects to the MCP server via SSE at `http://127.0.0.1:8000/sse
 
 ```text
 AI_Assistant_Fuli/
+├── fuli-app/           # ⚡ Fuli Desktop Operator App (Electron + Playwright)
+│   ├── main.js         # Window lifecycle, global shortcuts (Cmd+Shift+Space), tray
+│   ├── preload.js      # Secure context bridge
+│   ├── automation/     # Gemini Flash planner, Playwright browser, macOS system
+│   └── renderer/       # Glassmorphic floating prompt bar & action cards
 ├── server.py           # uv run fuli        → launches FastMCP server (SSE on :8000)
 ├── agent_fuli.py       # uv run fuli_voice  → launches LiveKit voice agent
 ├── pyproject.toml      # Project configuration & CLI entry points
+├── package.json        # Desktop app runner & scripts
 ├── .env.example        # Environment variable template
 │
 └── fuli/               # MCP server package
@@ -81,8 +88,22 @@ USER_NAME="Aareev"
 ```
 
 ### 3. Run
+ 
+#### ⚡ Desktop Operator App (Raycast / Vy style)
+To launch Fuli as a floating screen operator on macOS:
+```bash
+npm run app
+```
+- **HotKey**: Press `Cmd + Shift + Space` anywhere to summon or hide Fuli.
+- **Natural Language Actions**: Type commands like:
+  - *"Go to Google and search latest Nvidia GPU news"*
+  - *"Open Spotify and play lo-fi beats"*
+  - *"Check Hacker News top stories"*
+- **Watch Actions Live**: Fuli opens visible browser windows and highlights elements as it navigates and clicks.
+- **Escape / Dismiss**: Press `Esc` to hide or cancel an active task.
 
-Run these commands in two separate terminal tabs:
+#### 🎙️ Voice Agent & MCP Server (Optional)
+Run these commands in two separate terminal tabs if using voice:
 
 **Terminal 1 — MCP Server** (start this first):
 ```bash
@@ -102,6 +123,8 @@ Connect to your LiveKit room via the [LiveKit Agents Playground](https://agents-
 
 | Command | Entry point | Description |
 | --- | --- | --- |
+| `npm run app` | `fuli-app/main.js` | Launches the **Fuli Desktop Operator App** (floating prompt bar with Playwright + Gemini). |
+| `npm run test:executor` | `fuli-app/test-executor.js` | Runs end-to-end headless/headed test of the planner & browser execution pipeline. |
 | `uv run fuli` | `server.py → main()` | Starts the **FastMCP server** over SSE transport on port 8000. Registers tools, prompts, and resources. |
 | `uv run fuli_voice` | `agent_fuli.py → dev()` | Launches the **LiveKit voice agent** in development mode. Connects to your room and hooks up Fuli's brain. |
 

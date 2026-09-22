@@ -1,0 +1,12 @@
+{
+  "name": "ai-assistant-fuli",
+  "version": "1.0.0",
+  "description": "Fuli — AI Assistant & Autonomous Screen/Browser Operator",
+  "scripts": {
+    "app": "cd fuli-app && bun run start",
+    "app:npm": "cd fuli-app && npm start",
+    "test:planner": "cd fuli-app && node test-planner.js",
+    "test:browser": "cd fuli-app && node test-browser.js",
+    "test:executor": "cd fuli-app && node test-executor.js"
+  }
+}
