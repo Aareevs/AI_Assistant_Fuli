@@ -12,16 +12,15 @@ const DEFAULT_HEIGHT = 76; // compact prompt bar
 const EXPANDED_HEIGHT = 420; // when steps/progress are active
 
 function createTray() {
-  const logoPath = path.resolve(__dirname, '../images/Fuli_Logo.png');
-  let icon;
-  try {
+  const trayIconPath = path.resolve(__dirname, 'renderer/assets/tray-icon.png');
+  let icon = nativeImage.createFromPath(trayIconPath);
+  
+  if (icon.isEmpty()) {
+    const logoPath = path.resolve(__dirname, '../images/Fuli_Logo.png');
     icon = nativeImage.createFromPath(logoPath).resize({ width: 18, height: 18 });
-  } catch (e) {
-    icon = nativeImage.createEmpty();
   }
 
   tray = new Tray(icon);
-  tray.setTitle(' Fuli');
   tray.setToolTip('Fuli — AI Screen & Browser Operator (Click to toggle)');
 
   const contextMenu = Menu.buildFromTemplate([
@@ -69,24 +68,41 @@ function createWindow() {
   }
 }
 
+function showWindow() {
+  if (!mainWindow) return;
+
+  if (process.platform === 'darwin') {
+    app.focus({ steal: true });
+  }
+
+  mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  mainWindow.setAlwaysOnTop(true, 'floating', 1);
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.moveTop();
+  mainWindow.webContents.send('fuli:focus-input');
+}
+
+function hideWindow() {
+  if (!mainWindow) return;
+  mainWindow.hide();
+}
+
 function toggleWindow() {
   if (!mainWindow) return;
 
-  if (mainWindow.isVisible()) {
-    mainWindow.hide();
+  if (mainWindow.isVisible() && mainWindow.isFocused()) {
+    hideWindow();
   } else {
-    mainWindow.show();
-    mainWindow.focus();
-    mainWindow.setAlwaysOnTop(true, 'floating', 1);
-    mainWindow.webContents.send('fuli:focus-input');
+    showWindow();
   }
 }
 
 app.whenReady().then(() => {
-  const logoPath = path.resolve(__dirname, '../images/Fuli_Logo.png');
+  const iconPath = path.resolve(__dirname, 'renderer/assets/icon-128.png');
   if (process.platform === 'darwin' && app.dock) {
     try {
-      const dockIcon = nativeImage.createFromPath(logoPath);
+      const dockIcon = nativeImage.createFromPath(iconPath);
       app.dock.setIcon(dockIcon);
     } catch (e) {
       console.warn('Could not set dock icon:', e);
@@ -97,16 +113,23 @@ app.whenReady().then(() => {
   createTray();
 
   // Register global shortcuts: Cmd+Shift+Space and Option+Space / Alt+Space
-  const registered1 = globalShortcut.register('CommandOrControl+Shift+Space', toggleWindow);
-  const registered2 = globalShortcut.register('Alt+Space', toggleWindow);
+  const registered1 = globalShortcut.register('CommandOrControl+Shift+Space', () => {
+    toggleWindow();
+  });
+  const registered2 = globalShortcut.register('Alt+Space', () => {
+    toggleWindow();
+  });
+  const registered3 = globalShortcut.register('CommandOrControl+Alt+Space', () => {
+    toggleWindow();
+  });
 
-  console.log(`Global shortcut CommandOrControl+Shift+Space registered: ${registered1}`);
-  console.log(`Global shortcut Alt+Space registered: ${registered2}`);
+  console.log(`Global shortcuts registered:
+  Cmd+Shift+Space: ${registered1}
+  Option+Space:    ${registered2}
+  Cmd+Option+Space: ${registered3}`);
 
   // Show window initially on startup
-  mainWindow.show();
-  mainWindow.focus();
-  mainWindow.webContents.send('fuli:focus-input');
+  showWindow();
 
   app.on('activate', () => {
     toggleWindow();
