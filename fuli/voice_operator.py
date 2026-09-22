@@ -25,10 +25,16 @@ load_dotenv()
 USER_NAME = os.getenv("USER_NAME", "Aareev")
 SAMPLE_RATE = 16000
 BLOCK_SIZE = 1024
-SILENCE_THRESHOLD = 0.015  # Energy threshold for speech detection
-SILENCE_DURATION = 0.8     # Seconds of silence to conclude utterance
+SILENCE_THRESHOLD = 0.004  # Lowered sensitivity threshold for Mac mics
+SILENCE_DURATION = 0.7     # Seconds of silence to conclude utterance
 
-WAKE_WORDS = ["fuli", "hey fuli", "fully", "hey fully", "foolee", "phooli", "fulee"]
+# Expanded phonetic variations of "Fuli" recognized by Whisper
+WAKE_WORDS = [
+    "fuli", "fully", "hey fuli", "hey fully", 
+    "fooly", "foolee", "fulee", "phooli", 
+    "foley", "fuji", "furi", "flee", "philip", 
+    "philly", "poly", "pulley", "foolish", "fury"
+]
 
 audio_queue = queue.Queue()
 
@@ -96,20 +102,36 @@ def run_voice_operator():
     model = WhisperModel('tiny.en', device='cpu', compute_type='int8')
     print(f"Whisper model ready in {time.time() - t0:.2f}s!")
 
-    # 2. Start microphone stream
-    print("\n🎙️ Microphone listening for 'Fuli' or 'Hey Fuli'...")
-    print("Speak clearly into your microphone anytime.")
+    input_dev = sd.query_devices(kind='input')
+    dev_name = input_dev.get('name', 'Default Microphone')
+    print(f"\n🎙️ Microphone: {dev_name}")
+    print("Listening for 'Fuli'...")
 
     with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, blocksize=BLOCK_SIZE, callback=audio_callback):
         accumulated_audio = []
         is_speaking = False
         silence_start = None
+        zero_count = 0
+        warned_mic = False
 
         while True:
             chunk = audio_queue.get()
             energy = np.linalg.norm(chunk) / np.sqrt(len(chunk))
 
+            if energy == 0.0:
+                zero_count += 1
+                if zero_count > 60 and not warned_mic:
+                    warned_mic = True
+                    print("\n⚠️ NOTICE: Microphone input is returning 0.0 (Silence).")
+                    print("macOS is blocking microphone access to your terminal.")
+                    print("👉 Please open System Settings > Privacy & Security > Microphone")
+                    print("👉 Turn ON 'Visual Studio Code' (or 'Terminal') and restart.")
+            else:
+                zero_count = 0
+
             if energy > SILENCE_THRESHOLD:
+                if not is_speaking:
+                    print("• [Detecting speech...]", end="\r", flush=True)
                 is_speaking = True
                 silence_start = None
                 accumulated_audio.append(chunk)

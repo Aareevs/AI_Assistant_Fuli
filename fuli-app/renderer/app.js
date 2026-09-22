@@ -15,16 +15,26 @@ let currentSteps = [];
 // Focus input on load
 promptInput.focus();
 
+function resetToCleanState() {
+  if (!isRunning) {
+    promptInput.value = '';
+    setExpanded(false);
+    statusText.textContent = 'Fuli is ready';
+    summaryText.textContent = '';
+    stepsList.innerHTML = '';
+  }
+}
+
 if (window.fuliAPI && window.fuliAPI.onFocusInput) {
   window.fuliAPI.onFocusInput(() => {
+    resetToCleanState();
     promptInput.focus();
-    promptInput.select();
   });
 }
 
 window.addEventListener('focus', () => {
+  resetToCleanState();
   promptInput.focus();
-  promptInput.select();
 });
 
 if (window.fuliAPI && window.fuliAPI.onSetPromptAndRun) {
@@ -130,15 +140,23 @@ submitBtn.addEventListener('click', startExecution);
 cancelBtn.addEventListener('click', stopExecution);
 if (closeBtn) {
   closeBtn.addEventListener('click', () => {
+    resetToCleanState();
     window.fuliAPI.closeApp();
   });
 }
 if (micBtn) {
-  micBtn.addEventListener('click', () => {
+  micBtn.addEventListener('click', async () => {
     micBtn.classList.toggle('listening');
     if (micBtn.classList.contains('listening')) {
-      statusText.textContent = "🎙️ Listening... Say 'Fuli' or your command anytime";
+      statusText.textContent = "🎙️ Listening... Speak your command to Fuli";
       setExpanded(true, 130);
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+      } catch (err) {
+        statusText.textContent = "⚠️ Please allow Microphone in System Settings > Privacy";
+      }
     } else {
       setExpanded(false);
     }
@@ -152,6 +170,7 @@ promptInput.addEventListener('keydown', (e) => {
     if (isRunning) {
       stopExecution();
     } else {
+      resetToCleanState();
       window.fuliAPI.hideWindow();
     }
   }

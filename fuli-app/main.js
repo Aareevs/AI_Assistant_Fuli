@@ -193,6 +193,15 @@ app.whenReady().then(() => {
   createTray();
   startLocalCommandServer();
 
+  // Request macOS microphone permission so Fuli can hear voice commands
+  if (process.platform === 'darwin' && systemPreferences && systemPreferences.askForMediaAccess) {
+    systemPreferences.askForMediaAccess('microphone').then((granted) => {
+      console.log(`macOS Microphone access granted: ${granted}`);
+    }).catch(err => {
+      console.warn('Microphone permission notice:', err.message);
+    });
+  }
+
   // Register global shortcuts: Cmd+Shift+Space and Option+Space / Alt+Space
   const registered1 = globalShortcut.register('CommandOrControl+Shift+Space', () => {
     toggleWindow();
