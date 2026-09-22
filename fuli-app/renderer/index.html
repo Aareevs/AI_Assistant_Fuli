@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fuli Desktop</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="fuli-container" id="fuliContainer">
+    <!-- Top Prompt Bar -->
+    <div class="prompt-bar" id="promptBar">
+      <div class="fuli-badge">
+        <img src="./assets/Fuli_Logo.png" alt="Fuli" class="badge-img" />
+        <span class="badge-pulse"></span>
+      </div>
+
+      <input 
+        type="text" 
+        id="promptInput" 
+        class="prompt-input" 
+        placeholder="Ask Fuli to do anything (e.g. Go to Google and search...)" 
+        autocomplete="off" 
+        spellcheck="false"
+        autofocus
+      />
+
+      <div class="prompt-actions">
+        <button id="submitBtn" class="action-btn" title="Execute (Enter)">
+          <span>Run</span>
+          <kbd>↵</kbd>
+        </button>
+        <button id="cancelBtn" class="cancel-btn hidden" title="Cancel (Esc)">
+          <span>Stop</span>
+          <kbd>Esc</kbd>
+        </button>
+        <button id="closeBtn" class="close-btn" title="Close App">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Execution Status Card (Collapsible) -->
+    <div class="action-card hidden" id="actionCard">
+      <div class="action-header">
+        <div class="status-indicator">
+          <div class="spinner" id="statusSpinner"></div>
+          <span class="status-text" id="statusText">Fuli is ready</span>
+        </div>
+        <div class="summary-text" id="summaryText"></div>
+      </div>
+
+      <!-- Live Step Progress List -->
+      <div class="steps-list" id="stepsList">
+        <!-- Steps dynamically injected here -->
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "fuli-desktop",
+  "version": "1.0.0",
+  "description": "Fuli Desktop — AI screen & browser operator",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "node build.js",
+    "test:planner": "node test-planner.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "playwright": "^1.50.1"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^35.7.5"
+  }
+}
