@@ -22,6 +22,7 @@ const { actionExecutor } = require('./automation/executor');
 
 let mainWindow = null;
 let tray = null;
+let isTaskRunning = false;
 
 const DEFAULT_WIDTH = 680;
 const DEFAULT_HEIGHT = 76; // compact prompt bar
@@ -82,6 +83,13 @@ function createWindow() {
   if (mainWindow.setVisibleOnAllWorkspaces) {
     mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
+
+  // Auto-dismiss on click outside (Spotlight behavior) when idle
+  mainWindow.on('blur', () => {
+    if (!isTaskRunning && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+      mainWindow.hide();
+    }
+  });
 }
 
 function showWindow() {
@@ -93,6 +101,13 @@ function showWindow() {
 
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   mainWindow.setAlwaysOnTop(true, 'floating', 1);
+
+  // Re-center on active display
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth } = primaryDisplay.workAreaSize;
+  const x = Math.round((screenWidth - DEFAULT_WIDTH) / 2);
+  mainWindow.setPosition(x, 140);
+
   mainWindow.show();
   mainWindow.focus();
   mainWindow.moveTop();
@@ -107,7 +122,7 @@ function hideWindow() {
 function toggleWindow() {
   if (!mainWindow) return;
 
-  if (mainWindow.isVisible() && mainWindow.isFocused()) {
+  if (mainWindow.isVisible()) {
     hideWindow();
   } else {
     showWindow();
@@ -160,6 +175,7 @@ app.on('will-quit', () => {
 ipcMain.on('fuli:submit-prompt', async (event, prompt) => {
   if (!prompt || !prompt.trim()) return;
 
+  isTaskRunning = true;
   try {
     const result = await actionExecutor.executeTask(prompt.trim(), (progress) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -174,10 +190,13 @@ ipcMain.on('fuli:submit-prompt', async (event, prompt) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('fuli:error', { message: err.message });
     }
+  } finally {
+    isTaskRunning = false;
   }
 });
 
 ipcMain.on('fuli:cancel-task', () => {
+  isTaskRunning = false;
   actionExecutor.cancel();
 });
 

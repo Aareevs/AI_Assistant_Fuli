@@ -14,6 +14,18 @@ let currentSteps = [];
 // Focus input on load
 promptInput.focus();
 
+if (window.fuliAPI && window.fuliAPI.onFocusInput) {
+  window.fuliAPI.onFocusInput(() => {
+    promptInput.focus();
+    promptInput.select();
+  });
+}
+
+window.addEventListener('focus', () => {
+  promptInput.focus();
+  promptInput.select();
+});
+
 function setExpanded(expanded, customHeight) {
   if (expanded) {
     actionCard.classList.remove('hidden');
