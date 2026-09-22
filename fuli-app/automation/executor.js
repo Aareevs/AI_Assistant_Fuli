@@ -47,9 +47,18 @@ class ActionExecutor {
 
         // Execute step based on action type
         switch (step.action) {
-          case 'browser_navigate':
-            await browserController.navigate(step.url);
+          case 'browser_navigate': {
+            let targetUrl = step.url || step.target || step.link || step.targetUrl || step.website || step.address;
+            if (!targetUrl && step.description) {
+              const m = step.description.match(/https?:\/\/[^\s]+/);
+              if (m) targetUrl = m[0];
+              else if (/google/i.test(step.description)) targetUrl = 'https://www.google.com';
+              else if (/youtube/i.test(step.description)) targetUrl = 'https://www.youtube.com';
+              else if (/github/i.test(step.description)) targetUrl = 'https://www.github.com';
+            }
+            await browserController.navigate(targetUrl || 'https://www.google.com');
             break;
+          }
 
           case 'browser_type':
             await browserController.type(step.selector, step.text, step.pressEnter);

@@ -48,7 +48,18 @@ class BrowserController {
     }
   }
 
-  async navigate(url) {
+  async navigate(targetUrl) {
+    let url = targetUrl;
+    if (!url || typeof url !== 'string' || url === 'undefined') {
+      url = 'https://www.google.com';
+    }
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      if (url.includes('.') && !url.includes(' ')) {
+        url = 'https://' + url;
+      } else {
+        url = `https://www.google.com/search?q=${encodeURIComponent(url)}`;
+      }
+    }
     await this.init();
     await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     return { success: true, url: this.page.url() };

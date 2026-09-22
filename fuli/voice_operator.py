@@ -37,14 +37,20 @@ WAKE_WORDS = [
 ]
 
 audio_queue = queue.Queue()
+is_speaking_out_loud = False
 
 
 def speak_female_voice(text: str):
-    """Speaks text using free high-quality neural female voice (AriaNeural) or macOS Samantha."""
+    """Speaks text using free high-quality neural female voice (AriaNeural) or macOS Samantha.
+    Automatically mutes microphone intake during speech so Fuli never hears herself.
+    """
+    global is_speaking_out_loud
     if not text or not text.strip():
         return
     clean = text.replace('"', ' ').replace('\n', ' ').strip()
     tmp_path = f"/tmp/fuli_voice_{int(time.time() * 1000)}.mp3"
+    
+    is_speaking_out_loud = True
     try:
         cmd = f'uv run edge-tts --voice en-US-AriaNeural --text "{clean}" --write-media "{tmp_path}" && afplay "{tmp_path}" && rm -f "{tmp_path}"'
         subprocess.run(cmd, shell=True, timeout=10, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -53,6 +59,16 @@ def speak_female_voice(text: str):
             subprocess.run(f'say -v Samantha "{clean}"', shell=True, timeout=5)
         except Exception:
             pass
+    finally:
+        # Acoustic reverberation grace period (allow room reflections to die out)
+        time.sleep(0.3)
+        # Flush any audio frames that entered queue during speech
+        while not audio_queue.empty():
+            try:
+                audio_queue.get_nowait()
+            except queue.Empty:
+                break
+        is_speaking_out_loud = False
 
 
 def send_to_fuli_app(endpoint: str, payload: dict | None = None):
@@ -73,19 +89,31 @@ def send_to_fuli_app(endpoint: str, payload: dict | None = None):
 
 
 def audio_callback(indata, frames, time_info, status):
-    """Collects raw audio chunks from microphone."""
-    if status:
-        pass
+    """Collects raw audio chunks from microphone, ignoring audio while Fuli speaks."""
+    if is_speaking_out_loud:
+        return
     audio_queue.put(indata.copy())
 
 
-def clean_wake_word_from_text(text: str) -> str:
-    """Removes the wake word prefix from the prompt."""
+def clean_voice_prompt(text: str) -> str:
+    """Cleans wake words, polite fillers, and self-echo leakage from prompt."""
     cleaned = text
+    # Clean leaks of Fuli's own responses
+    cleaned = re.sub(r"hey,?\s*i'm\s*listening[.!?,]*", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"i'm\s*listening[.!?,]*", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"hey\s+aareev[.!?,]*", " ", cleaned, flags=re.IGNORECASE)
+    
+    # Remove all wake-word variations
     for w in WAKE_WORDS:
-        pattern = rf'^(hey\s+)?{w}[,\s!]*'
-        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-    return cleaned.strip()
+        cleaned = re.sub(rf'\b{w}\b[,\s!]*', ' ', cleaned, flags=re.IGNORECASE)
+    
+    # Remove conversational filler prefix
+    cleaned = re.sub(r'^(hey|yo|hi|hello|ok|okay)[,\s!]+', '', cleaned.strip(), flags=re.IGNORECASE)
+    cleaned = re.sub(r'^(can you|could you|please)\s+', '', cleaned.strip(), flags=re.IGNORECASE)
+    
+    # Clean multiple spaces
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
 
 
 def run_voice_operator():
@@ -165,11 +193,10 @@ def run_voice_operator():
                         send_to_fuli_app("/show")
 
                         # 2. Check if command was included in the same utterance
-                        command = clean_wake_word_from_text(transcript)
+                        command = clean_voice_prompt(transcript)
 
-                        if command and len(command) > 3:
+                        if command and len(command) > 2:
                             print(f"🚀 Executing spoken command: \"{command}\"")
-                            speak_female_voice(f"On it, {USER_NAME}.")
                             send_to_fuli_app("/command", {"prompt": command})
                         else:
                             # User only said "Fuli" -> speak greeting and listen for command
@@ -201,8 +228,9 @@ def run_voice_operator():
                             if cmd_audio:
                                 full_cmd = np.concatenate(cmd_audio, axis=0).flatten().astype(np.float32)
                                 c_segments, _ = model.transcribe(full_cmd, language="en", beam_size=1)
-                                follow_up = " ".join(s.text for s in c_segments).strip()
-                                if follow_up:
+                                follow_up_raw = " ".join(s.text for s in c_segments).strip()
+                                follow_up = clean_voice_prompt(follow_up_raw)
+                                if follow_up and len(follow_up) > 2:
                                     print(f"🚀 Executing spoken command: \"{follow_up}\"")
                                     send_to_fuli_app("/command", {"prompt": follow_up})
                                 else:

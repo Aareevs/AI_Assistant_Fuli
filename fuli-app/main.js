@@ -21,9 +21,19 @@ for (const envPath of envCandidates) {
 const { actionExecutor } = require('./automation/executor');
 const http = require('http');
 
+const LOG_FILE = '/tmp/fuli_app.log';
+function logFuli(...args) {
+  const line = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
+  try { fs.appendFileSync(LOG_FILE, line); } catch(e) {}
+  console.log(...args);
+}
+
 let mainWindow = null;
 let tray = null;
 let isTaskRunning = false;
+let voiceProcess = null;
+let allowBlurHide = false;
+let focusTimestamp = 0;
 
 function startLocalCommandServer() {
   const server = http.createServer((req, res) => {
@@ -126,14 +136,23 @@ function createWindow() {
   }
 
   // Auto-dismiss on click outside (Spotlight behavior) when idle
-  let hasBeenFocused = false;
+  mainWindow.on('show', () => {
+    allowBlurHide = false;
+    focusTimestamp = Date.now();
+  });
+
   mainWindow.on('focus', () => {
-    hasBeenFocused = true;
+    focusTimestamp = Date.now();
+    // Only allow blur to hide after being focused for at least 400ms
+    setTimeout(() => {
+      allowBlurHide = true;
+    }, 400);
   });
 
   mainWindow.on('blur', () => {
-    if (hasBeenFocused && !isTaskRunning && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-      hasBeenFocused = false;
+    const elapsed = Date.now() - focusTimestamp;
+    if (allowBlurHide && elapsed > 400 && !isTaskRunning && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+      allowBlurHide = false;
       hideWindow();
     }
   });
@@ -149,6 +168,9 @@ function createWindow() {
 
 function showWindow() {
   if (!mainWindow) return;
+
+  allowBlurHide = false;
+  focusTimestamp = Date.now();
 
   if (process.platform === 'darwin') {
     app.focus({ steal: true });
@@ -184,6 +206,64 @@ function toggleWindow() {
   }
 }
 
+function startVoiceOperator() {
+  const possibleScriptPaths = [
+    path.join(os.homedir(), 'VS-Code/AI_Assistant_Fuli/fuli/voice_operator.py'),
+    path.resolve(__dirname, '../fuli/voice_operator.py'),
+    path.resolve(__dirname, '../../fuli/voice_operator.py')
+  ];
+
+  let scriptPath = null;
+  for (const p of possibleScriptPaths) {
+    if (fs.existsSync(p)) {
+      scriptPath = p;
+      break;
+    }
+  }
+
+  if (!scriptPath) {
+    logFuli('Voice operator script not found in paths.');
+    return;
+  }
+
+  const projectDir = path.dirname(path.dirname(scriptPath));
+  const uvPath = fs.existsSync('/opt/homebrew/bin/uv') ? '/opt/homebrew/bin/uv' : 'uv';
+
+  logFuli(`Starting voice operator daemon with: ${uvPath} at ${projectDir}`);
+
+  // Kill old zombie processes first
+  try {
+    const { execSync } = require('child_process');
+    execSync('pkill -f "python.*voice_operator" || true');
+  } catch (e) {}
+
+  const { spawn } = require('child_process');
+  voiceProcess = spawn(uvPath, ['run', 'python', '-m', 'fuli.voice_operator'], {
+    cwd: projectDir,
+    env: {
+      ...process.env,
+      PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  voiceProcess.stdout.on('data', (data) => {
+    logFuli(`[Voice] ${data.toString().trim()}`);
+  });
+
+  voiceProcess.stderr.on('data', (data) => {
+    logFuli(`[Voice ERR] ${data.toString().trim()}`);
+  });
+
+  voiceProcess.on('exit', (code) => {
+    logFuli(`Voice operator exited with code ${code}`);
+    voiceProcess = null;
+    if (!app.isQuitting) {
+      setTimeout(startVoiceOperator, 3000);
+    }
+  });
+}
+
 app.whenReady().then(() => {
   const iconPath = path.resolve(__dirname, 'renderer/assets/icon-128.png');
   if (process.platform === 'darwin' && app.dock) {
@@ -202,27 +282,34 @@ app.whenReady().then(() => {
   // Request macOS microphone permission so Fuli can hear voice commands
   if (process.platform === 'darwin' && systemPreferences && systemPreferences.askForMediaAccess) {
     systemPreferences.askForMediaAccess('microphone').then((granted) => {
-      console.log(`macOS Microphone access granted: ${granted}`);
+      logFuli(`macOS Microphone access granted: ${granted}`);
     }).catch(err => {
-      console.warn('Microphone permission notice:', err.message);
+      logFuli(`Microphone permission notice: ${err.message}`);
     });
   }
 
-  // Register global shortcuts: Cmd+Shift+Space and Option+Space / Alt+Space
-  const registered1 = globalShortcut.register('CommandOrControl+Shift+Space', () => {
-    toggleWindow();
-  });
-  const registered2 = globalShortcut.register('Alt+Space', () => {
-    toggleWindow();
-  });
-  const registered3 = globalShortcut.register('CommandOrControl+Alt+Space', () => {
-    toggleWindow();
-  });
+  // Register global shortcuts: Alt+Space, Option+Space, Cmd+Shift+Space, Cmd+Alt+Space
+  const shortcutsToRegister = [
+    'Alt+Space',
+    'Option+Space',
+    'CommandOrControl+Shift+Space',
+    'CommandOrControl+Alt+Space'
+  ];
 
-  console.log(`Global shortcuts registered:
-  Cmd+Shift+Space: ${registered1}
-  Option+Space:    ${registered2}
-  Cmd+Option+Space: ${registered3}`);
+  for (const sc of shortcutsToRegister) {
+    try {
+      const success = globalShortcut.register(sc, () => {
+        logFuli(`Global shortcut triggered: ${sc}`);
+        toggleWindow();
+      });
+      logFuli(`Shortcut [${sc}] registered: ${success}`);
+    } catch (err) {
+      logFuli(`Failed to register shortcut [${sc}]: ${err.message}`);
+    }
+  }
+
+  // Auto-start voice operator in background so user NEVER has to run a terminal command!
+  startVoiceOperator();
 
   // Show window initially on startup
   showWindow();
@@ -234,10 +321,16 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+  if (voiceProcess) {
+    try { voiceProcess.kill('SIGTERM'); } catch (e) {}
+  }
 });
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  if (voiceProcess) {
+    try { voiceProcess.kill('SIGKILL'); } catch (e) {}
+  }
 });
 
 // IPC Handlers

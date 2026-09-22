@@ -74,6 +74,10 @@ try {
     <true/>
     <key>ProcessType</key>
     <string>Interactive</string>
+    <key>StandardOutPath</key>
+    <string>/tmp/fuli_app.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/fuli_app.err</string>
 </dict>
 </plist>`;
   fs.writeFileSync(launchAgentPlist, plistXml);

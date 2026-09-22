@@ -24,7 +24,8 @@ Return ONLY a valid JSON object matching this schema:
 Supported ACTION_TYPEs:
 1. "browser_navigate"
    Parameters: { "url": "https://..." }
-   Use when opening or directing the browser to a website. Always use fully qualified URLs (e.g. https://www.google.com).
+   Use when opening or directing the browser to a website. Always use fully qualified URLs (e.g. "https://www.google.com"). You MUST include the "url" property with the full URL.
+   Example: { "id": 1, "description": "Open Google in browser", "action": "browser_navigate", "url": "https://www.google.com" }
    
 2. "browser_type"
    Parameters: { "selector": "CSS_SELECTOR", "text": "STRING", "pressEnter": boolean }
