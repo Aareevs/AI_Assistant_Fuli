@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('fuliAPI', {
   submitPrompt: (prompt) => ipcRenderer.send('fuli:submit-prompt', prompt),
   cancelTask: () => ipcRenderer.send('fuli:cancel-task'),
   hideWindow: () => ipcRenderer.send('fuli:hide-window'),
+  closeApp: () => ipcRenderer.send('fuli:close-app'),
   resizeWindow: (width, height) => ipcRenderer.send('fuli:resize-window', { width, height }),
   
   onProgress: (callback) => {

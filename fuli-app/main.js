@@ -12,14 +12,20 @@ const DEFAULT_HEIGHT = 76; // compact prompt bar
 const EXPANDED_HEIGHT = 420; // when steps/progress are active
 
 function createTray() {
-  // Create a minimal 16x16 icon programmatically for the menu bar
-  const icon = nativeImage.createEmpty();
+  const logoPath = path.resolve(__dirname, '../images/Fuli_Logo.png');
+  let icon;
+  try {
+    icon = nativeImage.createFromPath(logoPath).resize({ width: 18, height: 18 });
+  } catch (e) {
+    icon = nativeImage.createEmpty();
+  }
+
   tray = new Tray(icon);
-  tray.setTitle('⚡ Fuli');
-  tray.setToolTip('Fuli — AI Screen & Browser Operator');
+  tray.setTitle(' Fuli');
+  tray.setToolTip('Fuli — AI Screen & Browser Operator (Click to toggle)');
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Show Fuli (Cmd+Shift+Space)', click: toggleWindow },
+    { label: '⚡ Show / Hide Fuli (Cmd+Shift+Space)', click: toggleWindow },
     { type: 'separator' },
     { label: 'Quit Fuli', click: () => app.quit() }
   ]);
@@ -44,7 +50,7 @@ function createWindow() {
     transparent: true,
     alwaysOnTop: true,
     resizable: false,
-    skipTaskbar: true,
+    skipTaskbar: false,
     hasShadow: true,
     show: false,
     webPreferences: {
@@ -56,12 +62,11 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
-  mainWindow.on('blur', () => {
-    // Optionally keep open if running a task, otherwise hide
-    if (!mainWindow.isDestroyed() && !mainWindow.webContents.isLoading()) {
-      // Allow window to stay visible during task execution
-    }
-  });
+  // Ensure true floating always-on-top on macOS across desktops/spaces
+  mainWindow.setAlwaysOnTop(true, 'floating', 1);
+  if (mainWindow.setVisibleOnAllWorkspaces) {
+    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
 }
 
 function toggleWindow() {
@@ -72,25 +77,39 @@ function toggleWindow() {
   } else {
     mainWindow.show();
     mainWindow.focus();
+    mainWindow.setAlwaysOnTop(true, 'floating', 1);
     mainWindow.webContents.send('fuli:focus-input');
   }
 }
 
 app.whenReady().then(() => {
+  const logoPath = path.resolve(__dirname, '../images/Fuli_Logo.png');
+  if (process.platform === 'darwin' && app.dock) {
+    try {
+      const dockIcon = nativeImage.createFromPath(logoPath);
+      app.dock.setIcon(dockIcon);
+    } catch (e) {
+      console.warn('Could not set dock icon:', e);
+    }
+  }
+
   createWindow();
   createTray();
 
-  // Register global shortcut: Cmd+Shift+Space
-  const ret = globalShortcut.register('CommandOrControl+Shift+Space', toggleWindow);
-  if (!ret) {
-    console.warn('Global shortcut registration failed');
-  }
+  // Register global shortcuts: Cmd+Shift+Space and Option+Space / Alt+Space
+  const registered1 = globalShortcut.register('CommandOrControl+Shift+Space', toggleWindow);
+  const registered2 = globalShortcut.register('Alt+Space', toggleWindow);
+
+  console.log(`Global shortcut CommandOrControl+Shift+Space registered: ${registered1}`);
+  console.log(`Global shortcut Alt+Space registered: ${registered2}`);
 
   // Show window initially on startup
-  toggleWindow();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.send('fuli:focus-input');
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    toggleWindow();
   });
 });
 
@@ -127,6 +146,10 @@ ipcMain.on('fuli:hide-window', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.hide();
   }
+});
+
+ipcMain.on('fuli:close-app', () => {
+  app.quit();
 });
 
 ipcMain.on('fuli:resize-window', (event, { width, height }) => {

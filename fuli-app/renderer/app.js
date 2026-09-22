@@ -1,6 +1,7 @@
 const promptInput = document.getElementById('promptInput');
 const submitBtn = document.getElementById('submitBtn');
 const cancelBtn = document.getElementById('cancelBtn');
+const closeBtn = document.getElementById('closeBtn');
 const actionCard = document.getElementById('actionCard');
 const statusText = document.getElementById('statusText');
 const summaryText = document.getElementById('summaryText');
@@ -107,6 +108,11 @@ function resetUIState() {
 // Event Listeners
 submitBtn.addEventListener('click', startExecution);
 cancelBtn.addEventListener('click', stopExecution);
+if (closeBtn) {
+  closeBtn.addEventListener('click', () => {
+    window.fuliAPI.closeApp();
+  });
+}
 
 promptInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
