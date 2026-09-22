@@ -90,6 +90,14 @@ function createWindow() {
       mainWindow.hide();
     }
   });
+
+  // Never destroy window on close; hide it so Option+Space always works
+  mainWindow.on('close', (event) => {
+    if (!app.isQuitting) {
+      event.preventDefault();
+      hideWindow();
+    }
+  });
 }
 
 function showWindow() {
@@ -167,6 +175,10 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('before-quit', () => {
+  app.isQuitting = true;
+});
+
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
 });
@@ -201,13 +213,11 @@ ipcMain.on('fuli:cancel-task', () => {
 });
 
 ipcMain.on('fuli:hide-window', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.hide();
-  }
+  hideWindow();
 });
 
 ipcMain.on('fuli:close-app', () => {
-  app.quit();
+  hideWindow();
 });
 
 ipcMain.on('fuli:resize-window', (event, { width, height }) => {
