@@ -5,6 +5,7 @@ Hands-free voice wake-word ("Fuli" / "Hey Fuli") detection and spoken command op
 - Wake Word & Speech-to-Text: faster-whisper (tiny.en running locally on Apple Silicon, $0 cost)
 - Text-to-Speech: Microsoft Edge Neural female voice (en-US-AriaNeural, $0 cost) with macOS Samantha fallback
 - Desktop Bridge: Connects directly to Fuli Desktop App (http://127.0.0.1:8765)
+- Control Server: Listens on http://127.0.0.1:8766 for in-app UI trigger events
 """
 
 import os
@@ -12,9 +13,11 @@ import sys
 import time
 import queue
 import re
+import threading
 import subprocess
 import urllib.request
 import json
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import numpy as np
 import sounddevice as sd
 from dotenv import load_dotenv
@@ -25,8 +28,8 @@ load_dotenv()
 USER_NAME = os.getenv("USER_NAME", "Aareev")
 SAMPLE_RATE = 16000
 BLOCK_SIZE = 1024
-SILENCE_THRESHOLD = 0.004  # Lowered sensitivity threshold for Mac mics
-SILENCE_DURATION = 0.7     # Seconds of silence to conclude utterance
+SILENCE_THRESHOLD = 0.004  # Sensitivity threshold for MacBook Air mic
+SILENCE_DURATION = 0.35    # Fast 350ms response time for snappy wake word
 
 # Expanded phonetic variations of "Fuli" recognized by Whisper
 WAKE_WORDS = [
@@ -38,6 +41,7 @@ WAKE_WORDS = [
 
 audio_queue = queue.Queue()
 is_speaking_out_loud = False
+external_listen_requested = threading.Event()
 
 
 def speak_female_voice(text: str):
@@ -61,7 +65,7 @@ def speak_female_voice(text: str):
             pass
     finally:
         # Acoustic reverberation grace period (allow room reflections to die out)
-        time.sleep(0.3)
+        time.sleep(0.25)
         # Flush any audio frames that entered queue during speech
         while not audio_queue.empty():
             try:
@@ -98,10 +102,11 @@ def audio_callback(indata, frames, time_info, status):
 def clean_voice_prompt(text: str) -> str:
     """Cleans wake words, polite fillers, and self-echo leakage from prompt."""
     cleaned = text
-    # Clean leaks of Fuli's own responses
+    # Clean leaks of Fuli's own responses or hallucinations
     cleaned = re.sub(r"hey,?\s*i'm\s*listening[.!?,]*", " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"i'm\s*listening[.!?,]*", " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"hey\s+aareev[.!?,]*", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"i've\s*taken\s*you\s*to.*?[.!?,]", " ", cleaned, flags=re.IGNORECASE)
     
     # Remove all wake-word variations
     for w in WAKE_WORDS:
@@ -116,6 +121,84 @@ def clean_voice_prompt(text: str) -> str:
     return cleaned
 
 
+def is_standalone_wake_word(text: str) -> bool:
+    """Checks if the utterance is just the wake word without a real multi-word command."""
+    cleaned = clean_voice_prompt(text)
+    if not cleaned or len(cleaned) < 3:
+        return True
+    # If after removing wake words, only generic filler words remain
+    words = [w for w in re.findall(r'\b\w+\b', cleaned.lower()) if w not in ['a', 'an', 'the', 'it', 'yes', 'yeah', 'now', 'go', 'ahead', 'hey', 'hi', 'ok', 'okay']]
+    return len(words) == 0
+
+
+class VoiceControlHandler(BaseHTTPRequestHandler):
+    """Local HTTP control server on port 8766 for UI interaction."""
+    def log_message(self, format, *args):
+        pass
+
+    def do_GET(self):
+        if self.path == '/listen':
+            external_listen_requested.set()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{"listening": true}')
+        elif self.path == '/reset':
+            while not audio_queue.empty():
+                try:
+                    audio_queue.get_nowait()
+                except queue.Empty:
+                    break
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{"reset": true}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
+def start_control_server():
+    try:
+        server = HTTPServer(('127.0.0.1', 8766), VoiceControlHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        print("✓ Voice Control Server running on http://127.0.0.1:8766")
+    except Exception as e:
+        print(f"Control server notice: {e}")
+
+
+def capture_next_utterance(model, max_wait=6.0):
+    """Records the next speech utterance from the microphone and returns the transcript."""
+    cmd_audio = []
+    cmd_speaking = False
+    cmd_silence = None
+    timeout_start = time.time()
+
+    while time.time() - timeout_start < max_wait:
+        try:
+            c_chunk = audio_queue.get(timeout=0.1)
+        except queue.Empty:
+            continue
+        c_energy = np.linalg.norm(c_chunk) / np.sqrt(len(c_chunk))
+        if c_energy > SILENCE_THRESHOLD:
+            cmd_speaking = True
+            cmd_silence = None
+            cmd_audio.append(c_chunk)
+        elif cmd_speaking:
+            cmd_audio.append(c_chunk)
+            if cmd_silence is None:
+                cmd_silence = time.time()
+            elif time.time() - cmd_silence > SILENCE_DURATION:
+                break
+
+    if cmd_audio:
+        full_cmd = np.concatenate(cmd_audio, axis=0).flatten().astype(np.float32)
+        c_segments, _ = model.transcribe(full_cmd, language="en", beam_size=1, condition_on_previous_text=False)
+        return " ".join(s.text for s in c_segments).strip()
+    return ""
+
+
 def run_voice_operator():
     print("\n⚡ Initializing Fuli Free & Local Voice Engine...")
     print("✓ STT: Local faster-whisper (tiny.en on Apple Silicon — $0 cost)")
@@ -123,6 +206,9 @@ def run_voice_operator():
     print(f"✓ Persona: Addressing {USER_NAME}")
     print("✓ Wake words: 'Fuli' or 'Hey Fuli'")
     print("-" * 55)
+
+    # Start local control server
+    start_control_server()
 
     # 1. Load Whisper model
     print("Loading local Whisper model...")
@@ -139,23 +225,28 @@ def run_voice_operator():
         accumulated_audio = []
         is_speaking = False
         silence_start = None
-        zero_count = 0
-        warned_mic = False
 
         while True:
-            chunk = audio_queue.get()
-            energy = np.linalg.norm(chunk) / np.sqrt(len(chunk))
+            # Check if UI clicked mic button
+            if external_listen_requested.is_set():
+                external_listen_requested.clear()
+                print("\n🎙️ [UI Mic Clicked] Listening for command...")
+                send_to_fuli_app("/status", {"status": "🎙️ Listening... Speak your command to Fuli"})
+                raw = capture_next_utterance(model, max_wait=7.0)
+                command = clean_voice_prompt(raw)
+                if command and len(command) > 2:
+                    print(f"🚀 Executing spoken command: \"{command}\"")
+                    send_to_fuli_app("/command", {"prompt": command})
+                else:
+                    send_to_fuli_app("/status", {"status": "Fuli is ready"})
+                continue
 
-            if energy == 0.0:
-                zero_count += 1
-                if zero_count > 60 and not warned_mic:
-                    warned_mic = True
-                    print("\n⚠️ NOTICE: Microphone input is returning 0.0 (Silence).")
-                    print("macOS is blocking microphone access to your terminal.")
-                    print("👉 Please open System Settings > Privacy & Security > Microphone")
-                    print("👉 Turn ON 'Visual Studio Code' (or 'Terminal') and restart.")
-            else:
-                zero_count = 0
+            try:
+                chunk = audio_queue.get(timeout=0.05)
+            except queue.Empty:
+                continue
+
+            energy = np.linalg.norm(chunk) / np.sqrt(len(chunk))
 
             if energy > SILENCE_THRESHOLD:
                 if not is_speaking:
@@ -174,8 +265,8 @@ def run_voice_operator():
                     is_speaking = False
                     silence_start = None
 
-                    # Transcribe audio with local Whisper
-                    segments, _ = model.transcribe(audio_data, language="en", beam_size=1)
+                    # Transcribe audio with local Whisper (fast, non-cached history)
+                    segments, _ = model.transcribe(audio_data, language="en", beam_size=1, condition_on_previous_text=False)
                     transcript = " ".join(s.text for s in segments).strip()
 
                     if not transcript:
@@ -189,54 +280,30 @@ def run_voice_operator():
 
                     if is_wake_word:
                         print("✨ Wake word DETECTED: Opening Fuli...")
-                        # 1. Bring up Fuli window on screen
+                        # 1. Bring up Fuli window on screen immediately
                         send_to_fuli_app("/show")
 
-                        # 2. Check if command was included in the same utterance
-                        command = clean_voice_prompt(transcript)
+                        # 2. Check if this was JUST the wake word (e.g. user said "Fuli" or "Hey Fuli")
+                        if is_standalone_wake_word(transcript):
+                            print(f"✓ User summoned Fuli. Prompt bar opened. Awaiting command.")
+                            send_to_fuli_app("/status", {"status": "🎙️ Listening for your command..."})
+                            speak_female_voice("I'm listening.")
 
-                        if command and len(command) > 2:
-                            print(f"🚀 Executing spoken command: \"{command}\"")
-                            send_to_fuli_app("/command", {"prompt": command})
-                        else:
-                            # User only said "Fuli" -> speak greeting and listen for command
-                            speak_female_voice(f"Hey {USER_NAME}, I'm listening.")
+                            # Clear buffer and capture the command utterance
+                            follow_up_raw = capture_next_utterance(model, max_wait=6.0)
+                            follow_up = clean_voice_prompt(follow_up_raw)
 
-                            # Record following command
-                            cmd_audio = []
-                            cmd_speaking = False
-                            cmd_silence = None
-                            timeout_start = time.time()
-
-                            while time.time() - timeout_start < 7.0:
-                                try:
-                                    c_chunk = audio_queue.get(timeout=0.2)
-                                except queue.Empty:
-                                    continue
-                                c_energy = np.linalg.norm(c_chunk) / np.sqrt(len(c_chunk))
-                                if c_energy > SILENCE_THRESHOLD:
-                                    cmd_speaking = True
-                                    cmd_silence = None
-                                    cmd_audio.append(c_chunk)
-                                elif cmd_speaking:
-                                    cmd_audio.append(c_chunk)
-                                    if cmd_silence is None:
-                                        cmd_silence = time.time()
-                                    elif time.time() - cmd_silence > SILENCE_DURATION:
-                                        break
-
-                            if cmd_audio:
-                                full_cmd = np.concatenate(cmd_audio, axis=0).flatten().astype(np.float32)
-                                c_segments, _ = model.transcribe(full_cmd, language="en", beam_size=1)
-                                follow_up_raw = " ".join(s.text for s in c_segments).strip()
-                                follow_up = clean_voice_prompt(follow_up_raw)
-                                if follow_up and len(follow_up) > 2:
-                                    print(f"🚀 Executing spoken command: \"{follow_up}\"")
-                                    send_to_fuli_app("/command", {"prompt": follow_up})
-                                else:
-                                    speak_female_voice("I didn't catch that.")
+                            if follow_up and len(follow_up) > 2 and not is_standalone_wake_word(follow_up):
+                                print(f"🚀 Executing spoken command: \"{follow_up}\"")
+                                send_to_fuli_app("/command", {"prompt": follow_up})
                             else:
-                                pass
+                                send_to_fuli_app("/status", {"status": "Fuli is ready"})
+                        else:
+                            # User spoke a full command in the same utterance (e.g. "Fuli open Spotify")
+                            command = clean_voice_prompt(transcript)
+                            if command and len(command) > 2:
+                                print(f"🚀 Executing spoken command: \"{command}\"")
+                                send_to_fuli_app("/command", {"prompt": command})
 
                     print("\n🎙️ Listening for 'Fuli'...")
 

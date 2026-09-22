@@ -35,5 +35,19 @@ contextBridge.exposeInMainWorld('fuliAPI', {
     const handler = (_event, prompt) => callback(prompt);
     ipcRenderer.on('fuli:set-prompt-and-run', handler);
     return () => ipcRenderer.removeListener('fuli:set-prompt-and-run', handler);
-  }
+  },
+
+  onSetPromptOnly: (callback) => {
+    const handler = (_event, prompt) => callback(prompt);
+    ipcRenderer.on('fuli:set-prompt-only', handler);
+    return () => ipcRenderer.removeListener('fuli:set-prompt-only', handler);
+  },
+
+  onSetStatus: (callback) => {
+    const handler = (_event, status) => callback(status);
+    ipcRenderer.on('fuli:set-status', handler);
+    return () => ipcRenderer.removeListener('fuli:set-status', handler);
+  },
+
+  triggerMicListen: () => ipcRenderer.send('fuli:trigger-mic-listen')
 });

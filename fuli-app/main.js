@@ -56,6 +56,43 @@ function startLocalCommandServer() {
           res.end(JSON.stringify({ error: err.message }));
         }
       });
+    } else if (req.method === 'POST' && req.url === '/set-prompt') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const { prompt, run } = JSON.parse(body);
+          showWindow();
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            if (run) {
+              mainWindow.webContents.send('fuli:set-prompt-and-run', prompt);
+            } else {
+              mainWindow.webContents.send('fuli:set-prompt-only', prompt);
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+    } else if (req.method === 'POST' && req.url === '/status') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const { status } = JSON.parse(body);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('fuli:set-status', status);
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
     } else if (req.url === '/show') {
       showWindow();
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -374,4 +411,10 @@ ipcMain.on('fuli:resize-window', (event, { width, height }) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setSize(width || DEFAULT_WIDTH, height || DEFAULT_HEIGHT, true);
   }
+});
+
+ipcMain.on('fuli:trigger-mic-listen', () => {
+  try {
+    http.get('http://127.0.0.1:8766/listen', () => {}).on('error', () => {});
+  } catch (e) {}
 });
