@@ -71,6 +71,30 @@ class ActionExecutor {
             await systemController.openApp(step.appName);
             break;
 
+          case 'app_quit':
+            await systemController.quitApp(step.appName);
+            break;
+
+          case 'system_volume':
+            await systemController.setVolume(step.percent);
+            break;
+
+          case 'system_media':
+            await systemController.mediaControl(step.action || step.command);
+            break;
+
+          case 'system_shell':
+            await systemController.runTerminalCommand(step.command);
+            break;
+
+          case 'system_screenshot':
+            await systemController.takeScreenshot();
+            break;
+
+          case 'system_file':
+            await systemController.openPath(step.path);
+            break;
+
           case 'system_open_url':
             await systemController.openUrl(step.url);
             break;

@@ -29,5 +29,11 @@ contextBridge.exposeInMainWorld('fuliAPI', {
     const handler = () => callback();
     ipcRenderer.on('fuli:focus-input', handler);
     return () => ipcRenderer.removeListener('fuli:focus-input', handler);
+  },
+
+  onSetPromptAndRun: (callback) => {
+    const handler = (_event, prompt) => callback(prompt);
+    ipcRenderer.on('fuli:set-prompt-and-run', handler);
+    return () => ipcRenderer.removeListener('fuli:set-prompt-and-run', handler);
   }
 });

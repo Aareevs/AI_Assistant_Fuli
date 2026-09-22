@@ -44,22 +44,49 @@ Supported ACTION_TYPEs:
    
 6. "app_open"
    Parameters: { "appName": "Google Chrome" | "Visual Studio Code" | "Spotify" | "Terminal" | etc. }
-   Use to launch an application on macOS via system command.
+   Use to launch an application on macOS.
    
-7. "system_open_url"
-   Parameters: { "url": "https://..." }
-   Use to open a URL in the default system browser (without autonomous control).
-   
-8. "speak"
-   Parameters: { "text": "Spoken text" }
-   Brief message to speak or display to the user.
+7. "app_quit"
+   Parameters: { "appName": "Spotify" | "Google Chrome" | etc. }
+   Use to quit an application.
+
+8. "system_volume"
+   Parameters: { "percent": number }
+   Use to set the macOS system output volume (0 to 100) or mute (0).
+
+9. "system_media"
+   Parameters: { "action": "play" | "pause" | "next" | "previous" | "toggle" }
+   Use to control playback on Spotify or Apple Music.
+
+10. "system_shell"
+    Parameters: { "command": "STRING" }
+    Use to execute shell/terminal commands on the Mac (e.g. git, listing files, system info, checking battery).
+
+11. "system_screenshot"
+    Parameters: {}
+    Use to take a screenshot of the Mac desktop.
+
+12. "system_open_url"
+    Parameters: { "url": "https://..." }
+    Use to open a URL in the default system browser.
+    
+13. "speak"
+    Parameters: { "text": "Spoken text" }
+    Use to speak a response aloud to the user in Fuli's natural female voice.
 
 Rules:
 - For web search commands ("Go to Google and search X", "Search X on Google"):
   Step 1: browser_navigate to "https://www.google.com"
   Step 2: browser_type query into "textarea[name='q'], input[name='q']" with pressEnter: true
   Step 3: browser_wait for 2000 ms to display results.
-- Keep steps crisp, reliable, and user-friendly.
+  Step 4: speak confirmation (e.g. "I've searched for X on Google for you.")
+- For device commands:
+  "Turn volume up/down to 50" -> system_volume { percent: 50 }, speak { text: "Volume set to 50 percent." }
+  "Play music" -> system_media { action: "play" }, speak { text: "Resuming music." }
+  "Pause music" -> system_media { action: "pause" }, speak { text: "Music paused." }
+  "Open Spotify" -> app_open { appName: "Spotify" }, speak { text: "Opening Spotify." }
+  "Close/Quit Slack" -> app_quit { appName: "Slack" }, speak { text: "Closed Slack." }
+- Always include a final or intermediate "speak" step so Fuli verbally speaks back to the user!
 - Return ONLY JSON. Do not wrap in markdown quotes if possible, or use standard \`\`\`json blocks.
 `;
 

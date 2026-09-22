@@ -19,10 +19,51 @@ for (const envPath of envCandidates) {
 }
 
 const { actionExecutor } = require('./automation/executor');
+const http = require('http');
 
 let mainWindow = null;
 let tray = null;
 let isTaskRunning = false;
+
+function startLocalCommandServer() {
+  const server = http.createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/command') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const { prompt } = JSON.parse(body);
+          if (prompt) {
+            showWindow();
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('fuli:set-prompt-and-run', prompt);
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+    } else if (req.url === '/show') {
+      showWindow();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, message: 'Window displayed' }));
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+
+  server.listen(8765, '127.0.0.1', () => {
+    console.log('⚡ Fuli command server listening on http://127.0.0.1:8765');
+  });
+
+  server.on('error', (e) => {
+    console.warn('Command server notice:', e.message);
+  });
+}
 
 const DEFAULT_WIDTH = 680;
 const DEFAULT_HEIGHT = 76; // compact prompt bar
@@ -150,6 +191,7 @@ app.whenReady().then(() => {
 
   createWindow();
   createTray();
+  startLocalCommandServer();
 
   // Register global shortcuts: Cmd+Shift+Space and Option+Space / Alt+Space
   const registered1 = globalShortcut.register('CommandOrControl+Shift+Space', () => {

@@ -2,6 +2,7 @@ const promptInput = document.getElementById('promptInput');
 const submitBtn = document.getElementById('submitBtn');
 const cancelBtn = document.getElementById('cancelBtn');
 const closeBtn = document.getElementById('closeBtn');
+const micBtn = document.getElementById('micBtn');
 const actionCard = document.getElementById('actionCard');
 const statusText = document.getElementById('statusText');
 const summaryText = document.getElementById('summaryText');
@@ -25,6 +26,13 @@ window.addEventListener('focus', () => {
   promptInput.focus();
   promptInput.select();
 });
+
+if (window.fuliAPI && window.fuliAPI.onSetPromptAndRun) {
+  window.fuliAPI.onSetPromptAndRun((prompt) => {
+    promptInput.value = prompt;
+    startExecution();
+  });
+}
 
 function setExpanded(expanded, customHeight) {
   if (expanded) {
@@ -123,6 +131,17 @@ cancelBtn.addEventListener('click', stopExecution);
 if (closeBtn) {
   closeBtn.addEventListener('click', () => {
     window.fuliAPI.closeApp();
+  });
+}
+if (micBtn) {
+  micBtn.addEventListener('click', () => {
+    micBtn.classList.toggle('listening');
+    if (micBtn.classList.contains('listening')) {
+      statusText.textContent = "🎙️ Listening... Say 'Fuli' or your command anytime";
+      setExpanded(true, 130);
+    } else {
+      setExpanded(false);
+    }
   });
 }
 
