@@ -93,29 +93,41 @@ class BrowserController {
   }
 
   /**
-   * If searching or filling text, directly navigates the active tab to search results.
+   * Types text into the active browser window using clipboard paste for 100% fidelity.
+   * Works on ChatGPT, Claude, textareas, inputs, and search bars without hijacking.
    */
   async type(selector, text, pressEnter = false) {
     if (!text) return { success: true };
-    if (pressEnter || !selector || selector.includes('q') || selector.includes('search')) {
-      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(text)}`;
-      return await this.navigate(searchUrl);
+
+    const browser = await this.detectRunningBrowser();
+    console.log(`⌨️ Pasting text into active tab of ${browser}: "${text.slice(0, 50)}..." (pressEnter: ${pressEnter})`);
+
+    // 1. Copy text to macOS clipboard safely via pbcopy
+    try {
+      const proc = exec('pbcopy');
+      proc.stdin.write(text);
+      proc.stdin.end();
+    } catch (e) {
+      console.warn('pbcopy error:', e.message);
     }
 
-    // Direct keystrokes into active window
+    await this.wait(180);
+
+    // 2. Activate browser and paste into current active element
+    const script = `
+      tell application "${browser}" to activate
+      delay 0.3
+      tell application "System Events"
+        keystroke "v" using {command down}
+        ${pressEnter ? 'delay 0.4\nkey code 36' : ''}
+      end tell
+    `;
+
     try {
-      const browser = await this.detectRunningBrowser();
-      const escaped = text.replace(/"/g, '\\"');
-      const script = `
-        tell application "${browser}" to activate
-        tell application "System Events"
-          keystroke "${escaped}"
-          ${pressEnter ? 'key code 36' : ''}
-        end tell
-      `;
-      await execPromise(`osascript -e '${script}'`, { timeout: 2000 });
+      await execPromise(`osascript -e '${script.replace(/'/g, "'\\''")}'`, { timeout: 4000 });
       return { success: true };
     } catch (err) {
+      console.warn('Type error:', err.message);
       return { success: false, error: err.message };
     }
   }

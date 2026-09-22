@@ -53,10 +53,18 @@ class ActionExecutor {
               const m = step.description.match(/https?:\/\/[^\s]+/);
               if (m) targetUrl = m[0];
               else if (/google/i.test(step.description)) targetUrl = 'https://www.google.com';
+              else if (/chatgpt/i.test(step.description)) targetUrl = 'https://chatgpt.com';
               else if (/youtube/i.test(step.description)) targetUrl = 'https://www.youtube.com';
               else if (/github/i.test(step.description)) targetUrl = 'https://www.github.com';
             }
+            if (targetUrl && targetUrl.includes('chat.openai.com')) {
+              targetUrl = 'https://chatgpt.com';
+            }
             await browserController.navigate(targetUrl || 'https://www.google.com');
+            // Allow dynamic web apps (ChatGPT, YouTube, etc.) to paint their UI before next action
+            if (targetUrl && (targetUrl.includes('chatgpt.com') || targetUrl.includes('claude.ai'))) {
+              await browserController.wait(2000);
+            }
             break;
           }
 

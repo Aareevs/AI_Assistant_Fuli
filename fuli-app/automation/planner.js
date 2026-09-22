@@ -135,7 +135,32 @@ function tryFastPath(prompt) {
     };
   }
 
-  // 4. Volume control
+  // 4. Open ChatGPT and send a prompt / Open ChatGPT
+  const chatGptSendMatch = prompt.match(/^open\s+chatgpt\s+and\s+(?:send|type|ask|prompt)\s+(.+)$/i);
+  if (chatGptSendMatch && chatGptSendMatch[1]) {
+    let textToSend = chatGptSendMatch[1].trim();
+    textToSend = textToSend.replace(/^(?:a\s+)?prompt\s*[:\s-]*\s*/i, '').replace(/^["']|["']$/g, '');
+    return {
+      summary: `Open ChatGPT and send: "${textToSend}"`,
+      steps: [
+        { id: 1, description: "Navigate to ChatGPT in active tab", action: "browser_navigate", url: "https://chatgpt.com" },
+        { id: 2, description: "Wait for ChatGPT interface to load", action: "browser_wait", durationMs: 2500 },
+        { id: 3, description: `Send prompt to ChatGPT`, action: "browser_type", text: textToSend, pressEnter: true },
+        { id: 4, description: "Confirm prompt sent", action: "speak", text: "Sent your prompt to ChatGPT." }
+      ]
+    };
+  }
+  if (/^(open\s+)?chatgpt$/i.test(p) || /^go to chatgpt$/i.test(p) || /^can you open chatgpt$/i.test(p)) {
+    return {
+      summary: "Open ChatGPT in your current browser tab",
+      steps: [
+        { id: 1, description: "Navigate to ChatGPT in active tab", action: "browser_navigate", url: "https://chatgpt.com" },
+        { id: 2, description: "Confirm opening ChatGPT", action: "speak", text: "Opening ChatGPT." }
+      ]
+    };
+  }
+
+  // 5. Volume control
   const volMatch = p.match(/(?:set\s+)?volume\s+(?:to\s+)?(\d+)/i) || p.match(/turn\s+volume\s+(?:to\s+)?(\d+)/i);
   if (volMatch && volMatch[1]) {
     const pct = parseInt(volMatch[1], 10);
