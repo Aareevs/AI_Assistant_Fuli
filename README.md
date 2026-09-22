@@ -138,4 +138,5 @@ Once built:
 
 ## License
 
-MIT License. Crafted with precision for seamless autonomous desktop and voice operation.
+This project is licensed under the [MIT License](LICENSE) — see the [LICENSE](LICENSE) file for details.
+
