@@ -48,20 +48,23 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "console":
         agent_cmd = [sys.executable, "agent_fuli.py", "console"]
 
+    agent_process = None
     try:
         agent_process = subprocess.Popen(agent_cmd)
         agent_process.wait()
     except KeyboardInterrupt:
         print("\n[Launcher] Shutting down Fuli...")
     finally:
-        try:
-            agent_process.terminate()
-        except Exception:
-            pass
-        try:
-            server_process.terminate()
-        except Exception:
-            pass
+        if agent_process:
+            try:
+                agent_process.terminate()
+            except Exception:
+                pass
+        if server_process:
+            try:
+                server_process.terminate()
+            except Exception:
+                pass
         cleanup_port(8000)
         print("[Launcher] Shutdown complete.")
 

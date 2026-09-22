@@ -47,9 +47,26 @@ class ActionExecutor {
 
         // Execute step based on action type
         switch (step.action) {
-          case 'browser_navigate':
-            await browserController.navigate(step.url);
+          case 'browser_navigate': {
+            let targetUrl = step.url || step.target || step.link || step.targetUrl || step.website || step.address;
+            if (!targetUrl && step.description) {
+              const m = step.description.match(/https?:\/\/[^\s]+/);
+              if (m) targetUrl = m[0];
+              else if (/google/i.test(step.description)) targetUrl = 'https://www.google.com';
+              else if (/chatgpt/i.test(step.description)) targetUrl = 'https://chatgpt.com';
+              else if (/youtube/i.test(step.description)) targetUrl = 'https://www.youtube.com';
+              else if (/github/i.test(step.description)) targetUrl = 'https://www.github.com';
+            }
+            if (targetUrl && targetUrl.includes('chat.openai.com')) {
+              targetUrl = 'https://chatgpt.com';
+            }
+            await browserController.navigate(targetUrl || 'https://www.google.com');
+            // Allow dynamic web apps (ChatGPT, YouTube, etc.) to paint their UI before next action
+            if (targetUrl && (targetUrl.includes('chatgpt.com') || targetUrl.includes('claude.ai'))) {
+              await browserController.wait(2000);
+            }
             break;
+          }
 
           case 'browser_type':
             await browserController.type(step.selector, step.text, step.pressEnter);
@@ -69,6 +86,30 @@ class ActionExecutor {
 
           case 'app_open':
             await systemController.openApp(step.appName);
+            break;
+
+          case 'app_quit':
+            await systemController.quitApp(step.appName);
+            break;
+
+          case 'system_volume':
+            await systemController.setVolume(step.percent);
+            break;
+
+          case 'system_media':
+            await systemController.mediaControl(step.action || step.command);
+            break;
+
+          case 'system_shell':
+            await systemController.runTerminalCommand(step.command);
+            break;
+
+          case 'system_screenshot':
+            await systemController.takeScreenshot();
+            break;
+
+          case 'system_file':
+            await systemController.openPath(step.path);
             break;
 
           case 'system_open_url':

@@ -1,39 +1,40 @@
-# Fuli — AI Voice Assistant & MCP Server
+# Fuli — AI Desktop Operator & Voice Assistant (100% Free & Local)
 
-Fuli is an agile, sharp, and intelligent AI voice assistant split into two cooperating components:
+<p align="center">
+  <img src="images/Fuli_Logo.png" width="120" alt="Fuli Logo" />
+</p>
 
-| Component | Command | What it is |
-| --- | --- | --- |
-| **Desktop App** | `npm run app` | A floating Raycast/Vy-style desktop operator app with autonomous browser navigation, screen execution, and glassmorphic UI. |
-| **MCP Server** | `uv run fuli` | A [FastMCP](https://github.com/jlowin/fastmcp) server exposing tools (live global news, financial briefings, browser monitors, system utilities) over SSE transport. |
-| **Voice Agent** | `uv run fuli_voice` | A [LiveKit Agents](https://github.com/livekit/agents) voice pipeline that listens to your speech, reasons with an LLM (Gemini 2.5 Flash / OpenAI), and speaks back with a crisp, natural female voice (OpenAI Nova / Sarvam Kavya) while invoking tools in real time. |
+Fuli is an agile, intelligent, autonomous macOS desktop operator and hands-free voice assistant. Designed as a permanent Spotlight/Raycast-style operator, Fuli controls your Mac, navigates your active browser in-place, launches and quits apps, manages playback, and responds verbally with a natural female voice—all at **$0.00 cost** (zero paid APIs required).
 
 ---
 
-## Personality & Voice
+## Key Features
 
-- **Persona**: Sharp, quick, natural cadence that sounds like a real person over voice rather than a robotic butler.
-- **Form of Address**: Calls you directly by name (configurable via `USER_NAME` in `.env`).
-- **Cadence**: Concise, responsive, zero fluff, with proactive visual monitors.
+- **⚡ Instant Shortcut (`Option + Space`)**: Summon or dismiss Fuli instantly from anywhere on macOS, just like Spotlight (`Cmd + Space`).
+- **🎙️ Hands-Free Wake Word ("Fuli")**: Say *"Fuli"* to wake her up instantly (~250ms sliding-window detection) with a crisp 50ms tactile chime.
+- **🗣️ Natural Female Voice (Free)**: Conversational verbal feedback using Microsoft Edge Neural TTS (`en-US-AriaNeural`) and macOS native speech (`Samantha`).
+- **🌐 In-Place Browser Navigation**: Operates directly inside your **current open browser** (Microsoft Edge, Google Chrome, Safari). Reuses your existing tab in place—**no test browsers, no automation banners, and no unwanted new tabs**.
+- **🤖 Autonomous Web App Interaction**: Paste and send prompts directly into **ChatGPT**, Claude, Google Search, and web forms with native clipboard fidelity.
+- **💻 Full macOS Device Control**:
+  - Launch and quit any application (*Spotify, VS Code, Slack, WhatsApp, Terminal, Discord, etc.*)
+  - System volume adjustment (0–100%) and mute/unmute
+  - Media playback controls (*Play, Pause, Next Track for Spotify & Apple Music*)
+  - Desktop screenshots and terminal command execution
+- **💰 100% Free Architecture ($0 Cost)**: Runs entirely on local Apple Silicon hardware and free provider tiers. Zero paid API subscriptions, zero token bills.
+- **🔄 24/7 Background Daemon**: Managed by macOS `launchd` (`com.aareev.fuli`). Boots automatically on login and revives in milliseconds. No terminal commands required to keep it alive.
 
 ---
 
-## Architecture
+## Architecture & Zero-Cost Stack
 
-```text
-Microphone ──► STT (Sarvam Saaras v3 / Whisper)
-                    │
-                    ▼
-              LLM (Gemini 2.5 Flash / GPT-4o) ◄──────► MCP Server (FastMCP / SSE on :8000)
-                    │                                        ├─ get_world_news
-                    ▼                                        ├─ open_world_monitor
-              TTS (OpenAI nova / Sarvam kavya)               ├─ get_world_finance_news
-                    │                                        ├─ open_finance_world_monitor
-                    ▼                                        └─ …more tools
-             Speaker / LiveKit Room
-```
-
-The voice agent connects to the MCP server via SSE at `http://127.0.0.1:8000/sse` (or resolved host IP).
+| Layer | Technology | Cost | Description |
+| :--- | :--- | :--- | :--- |
+| **Desktop UI** | Electron 35 + Glassmorphic CSS | Free | Floating, auto-centering prompt bar pinned to top of screen with dark glassmorphism. |
+| **Wake Word & STT** | `faster-whisper` (`tiny.en`) | **$0.00** | Runs locally on Apple Silicon (4 CPU threads, ~0.3s inference). 100% offline & private. |
+| **Voice Output (TTS)** | Microsoft Edge Neural TTS + macOS `Samantha` | **$0.00** | Crisp, natural female voice (`en-US-AriaNeural`). Zero subscription or API keys needed. |
+| **Browser Operator** | AppleScript + System Events | Free | Directly updates `active tab of front window` in Microsoft Edge / Chrome / Safari in-place. |
+| **Action Planner** | Local Fast-Path Engine + Gemini Flash Fallback | **$0.00** | Sub-millisecond rule engine for all everyday tasks; Gemini free tier for complex multi-step plans. |
+| **Daemon Manager** | macOS `launchd` LaunchAgent | Built-in | Always-on background daemon running `Fuli.app` and auto-spawning the voice operator. |
 
 ---
 
@@ -41,25 +42,27 @@ The voice agent connects to the MCP server via SSE at `http://127.0.0.1:8000/sse
 
 ```text
 AI_Assistant_Fuli/
-├── fuli-app/           # ⚡ Fuli Desktop Operator App (Electron + Playwright)
-│   ├── main.js         # Window lifecycle, global shortcuts (Cmd+Shift+Space), tray
-│   ├── preload.js      # Secure context bridge
-│   ├── automation/     # Gemini Flash planner, Playwright browser, macOS system
-│   └── renderer/       # Glassmorphic floating prompt bar & action cards
-├── server.py           # uv run fuli        → launches FastMCP server (SSE on :8000)
-├── agent_fuli.py       # uv run fuli_voice  → launches LiveKit voice agent
-├── pyproject.toml      # Project configuration & CLI entry points
-├── package.json        # Desktop app runner & scripts
-├── .env.example        # Environment variable template
+├── fuli-app/               # ⚡ Fuli Native Desktop Operator App
+│   ├── main.js             # Electron main process, hotkey registration (Option+Space), daemon runner
+│   ├── preload.js          # Secure IPC context bridge
+│   ├── build.js            # Native macOS .app packager & launchd agent installer
+│   ├── automation/         # Local & Cloud action execution engine
+│   │   ├── planner.js      # Sub-millisecond fast-path parser & Gemini model fallback chain
+│   │   ├── browser.js      # Active browser tab controller (Edge/Chrome/Safari in-place)
+│   │   ├── system.js       # macOS native control (volume, media, apps, shell, screenshot)
+│   │   └── executor.js     # Sequential plan orchestrator with progress streaming
+│   └── renderer/           # Glassmorphic UI (HTML, CSS, JS) with dynamic resizing
 │
-└── fuli/               # MCP server package
-    ├── config.py       # Settings & environment variables
-    ├── tools/          # MCP tools callable by the agent
-    │   ├── web.py      # get_world_news, get_world_finance_news, visual monitors
-    │   ├── system.py   # get_current_time, get_system_info
-    │   └── utils.py    # format_json, word_count
-    ├── prompts/        # MCP prompt templates (summarize, explain_code)
-    └── resources/      # MCP resources (fuli://info)
+├── fuli/                   # 🎙️ Local Voice Engine & MCP Server
+│   ├── voice_operator.py   # Real-time ~250ms sliding-window wake-word & STT/TTS engine
+│   ├── config.py           # Environment & assistant identity
+│   └── tools/              # MCP tools (news, finance, web, system monitors)
+│
+├── server.py               # FastMCP server over SSE transport (:8000)
+├── agent_fuli.py           # Optional LiveKit real-time voice agent
+├── package.json            # Desktop app scripts & build tooling
+├── pyproject.toml          # Python dependencies managed via uv
+└── .env                    # Credentials and user preferences
 ```
 
 ---
@@ -67,105 +70,72 @@ AI_Assistant_Fuli/
 ## Quick Start
 
 ### 1. Prerequisites
-
-* Python ≥ 3.11
-* [`uv`](https://github.com/astral-sh/uv) (`curl -LsSf https://astral.sh/uv/install.sh | sh` or `pip install uv`)
-* A free [LiveKit Cloud](https://cloud.livekit.io) project
+- macOS (Apple Silicon M1/M2/M3/M4 recommended)
+- Node.js ≥ 18
+- Python ≥ 3.11 & [`uv`](https://github.com/astral-sh/uv) (`brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`)
 
 ### 2. Setup
 
 ```bash
-# Sync dependencies and virtualenv
+# Clone the repository
+git clone https://github.com/Aareev/AI_Assistant_Fuli.git
+cd AI_Assistant_Fuli
+
+# Install Python dependencies
 uv sync
 
-# Configure environment variables
+# Install Node dependencies
+cd fuli-app && npm install && cd ..
+
+# Configure environment
 cp .env.example .env
 ```
 
-Open `.env` and set your credentials (see table below). You can also set your name:
+Open `.env` and set your preferred identity:
 ```env
 USER_NAME="Aareev"
+SERVER_NAME="Fuli"
+GOOGLE_API_KEY="your_free_google_ai_studio_key"
 ```
 
-### 3. Run
- 
-#### ⚡ Desktop Operator App (Raycast / Vy style)
-To launch Fuli as a floating screen operator on macOS:
+### 3. Build & Install Native macOS Application
+
+Build the standalone `/Applications/Fuli.app` bundle and register the 24/7 background LaunchAgent:
 ```bash
-npm run app
-```
-- **HotKey**: Press `Cmd + Shift + Space` anywhere to summon or hide Fuli.
-- **Natural Language Actions**: Type commands like:
-  - *"Go to Google and search latest Nvidia GPU news"*
-  - *"Open Spotify and play lo-fi beats"*
-  - *"Check Hacker News top stories"*
-- **Watch Actions Live**: Fuli opens visible browser windows and highlights elements as it navigates and clicks.
-- **Escape / Dismiss**: Press `Esc` to hide or cancel an active task.
-
-#### 🎙️ Voice Agent & MCP Server (Optional)
-Run these commands in two separate terminal tabs if using voice:
-
-**Terminal 1 — MCP Server** (start this first):
-```bash
-uv run fuli
+npm run build:app
 ```
 
-**Terminal 2 — Voice Agent**:
-```bash
-uv run fuli_voice
-```
-
-Connect to your LiveKit room via the [LiveKit Agents Playground](https://agents-playground.livekit.io) to start talking to Fuli.
+Once built:
+- **`Option + Space`**: Press anywhere on your Mac to toggle Fuli.
+- **"Fuli"**: Speak out loud to wake Fuli hands-free.
+- Fuli starts automatically on macOS login and runs 24/7 without needing any terminal window open.
 
 ---
 
-## CLI Commands
+## How to Use Fuli
 
-| Command | Entry point | Description |
-| --- | --- | --- |
-| `npm run app` | `fuli-app/main.js` | Launches the **Fuli Desktop Operator App** (floating prompt bar with Playwright + Gemini). |
-| `npm run test:executor` | `fuli-app/test-executor.js` | Runs end-to-end headless/headed test of the planner & browser execution pipeline. |
-| `uv run fuli` | `server.py → main()` | Starts the **FastMCP server** over SSE transport on port 8000. Registers tools, prompts, and resources. |
-| `uv run fuli_voice` | `agent_fuli.py → dev()` | Launches the **LiveKit voice agent** in development mode. Connects to your room and hooks up Fuli's brain. |
+### Example Voice & Text Commands
 
----
-
-## Environment Variables
-
-| Variable | Required | Description |
-| --- | --- | --- |
-| `USER_NAME` | Optional | Name Fuli uses to address you (default: `"Aareev"`) |
-| `SERVER_NAME` | Optional | Name of the MCP server instance (default: `"Fuli"`) |
-| `LIVEKIT_URL` | ✅ | LiveKit Cloud WebSocket URL (`wss://...`) |
-| `LIVEKIT_API_KEY` | ✅ | LiveKit Cloud API Key |
-| `LIVEKIT_API_SECRET` | ✅ | LiveKit Cloud API Secret |
-| `GOOGLE_API_KEY` | ✅ *(Default LLM)* | Gemini API Key for `gemini-2.5-flash` |
-| `OPENAI_API_KEY` | ✅ *(Default TTS)* | OpenAI API Key for TTS (`nova` voice) |
-| `SARVAM_API_KEY` | ✅ *(Default STT)* | Sarvam AI API Key for speech transcription |
-| `GROQ_API_KEY` | Optional | Groq API Key if using Groq models |
+| Command Category | Example Spoken / Typed Prompt | Action Taken |
+| :--- | :--- | :--- |
+| **ChatGPT Automation** | *"Open ChatGPT and send prompt write a sci-fi prologue"* | Opens `chatgpt.com` in your open Edge tab, pastes the prompt into the chatbox, and presses Enter. |
+| **Website Navigation** | *"Open YouTube"* or *"Go to GitHub"* | Navigates your active browser tab directly to the website without creating new tabs. |
+| **Search** | *"Search quantum computing on Google"* | Directly searches Google in your active browser tab. |
+| **App Control** | *"Open Spotify"* / *"Launch VS Code"* / *"Quit Slack"* | Opens or closes the application natively on macOS. |
+| **Media Playback** | *"Play music"*, *"Pause music"*, *"Next song"* | Controls Spotify or Apple Music playback. |
+| **Audio Volume** | *"Set volume to 50"*, *"Turn volume up"*, *"Mute"* | Adjusts macOS system audio output volume. |
+| **Screen Capture** | *"Take a screenshot"* | Captures your screen and saves it directly to your Desktop. |
 
 ---
 
-## Customizing Providers & Voices
+## Customization
 
-In [agent_fuli.py](file:///Users/aareev/VS-Code/AI_Assistant_Fuli/agent_fuli.py), you can configure:
-
-```python
-STT_PROVIDER        = "sarvam"   # "sarvam" | "whisper"
-LLM_PROVIDER        = "gemini"   # "gemini" | "openai"
-TTS_PROVIDER        = "openai"   # "openai" | "sarvam"
-
-# Female TTS options:
-OPENAI_TTS_VOICE    = "nova"     # Clean, natural female voice
-SARVAM_TTS_SPEAKER  = "kavya"    # Natural Indian-English female voice
-```
+- **Form of Address**: Change `USER_NAME` in `.env` to whatever name you want Fuli to call you.
+- **Default Browser**: Fuli automatically checks for running browsers and prioritizes **Microsoft Edge**, falling back to **Google Chrome**, **Safari**, or your system default.
+- **Shortcuts**: Both `Option + Space` and `Cmd + Shift + Space` are globally registered.
 
 ---
 
-## Adding New Tools
+## License
 
-1. Create or modify a tool file in `fuli/tools/`.
-2. Define a `register(mcp)` function and decorate tools with `@mcp.tool()`.
-3. Register the module in `fuli/tools/__init__.py`.
-
-The MCP server will register your new tools on the next restart.
+MIT License. Crafted with precision for seamless autonomous desktop and voice operation.

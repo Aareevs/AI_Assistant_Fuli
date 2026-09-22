@@ -2,6 +2,7 @@ const promptInput = document.getElementById('promptInput');
 const submitBtn = document.getElementById('submitBtn');
 const cancelBtn = document.getElementById('cancelBtn');
 const closeBtn = document.getElementById('closeBtn');
+const micBtn = document.getElementById('micBtn');
 const actionCard = document.getElementById('actionCard');
 const statusText = document.getElementById('statusText');
 const summaryText = document.getElementById('summaryText');
@@ -14,17 +15,50 @@ let currentSteps = [];
 // Focus input on load
 promptInput.focus();
 
+function resetToCleanState() {
+  if (!isRunning) {
+    promptInput.value = '';
+    setExpanded(false);
+    statusText.textContent = 'Fuli is ready';
+    summaryText.textContent = '';
+    stepsList.innerHTML = '';
+  }
+}
+
 if (window.fuliAPI && window.fuliAPI.onFocusInput) {
   window.fuliAPI.onFocusInput(() => {
+    resetToCleanState();
     promptInput.focus();
-    promptInput.select();
   });
 }
 
 window.addEventListener('focus', () => {
+  resetToCleanState();
   promptInput.focus();
-  promptInput.select();
 });
+
+if (window.fuliAPI && window.fuliAPI.onSetPromptAndRun) {
+  window.fuliAPI.onSetPromptAndRun((prompt) => {
+    promptInput.value = prompt;
+    if (micBtn) micBtn.classList.remove('listening');
+    startExecution();
+  });
+}
+
+if (window.fuliAPI && window.fuliAPI.onSetPromptOnly) {
+  window.fuliAPI.onSetPromptOnly((prompt) => {
+    promptInput.value = prompt;
+    if (micBtn) micBtn.classList.remove('listening');
+    promptInput.focus();
+  });
+}
+
+if (window.fuliAPI && window.fuliAPI.onSetStatus) {
+  window.fuliAPI.onSetStatus((status) => {
+    statusText.textContent = status;
+    setExpanded(true, 130);
+  });
+}
 
 function setExpanded(expanded, customHeight) {
   if (expanded) {
@@ -114,6 +148,7 @@ function resetUIState() {
   submitBtn.classList.remove('hidden');
   cancelBtn.classList.add('hidden');
   promptInput.disabled = false;
+  if (micBtn) micBtn.classList.remove('listening');
   promptInput.focus();
 }
 
@@ -122,7 +157,22 @@ submitBtn.addEventListener('click', startExecution);
 cancelBtn.addEventListener('click', stopExecution);
 if (closeBtn) {
   closeBtn.addEventListener('click', () => {
+    resetToCleanState();
     window.fuliAPI.closeApp();
+  });
+}
+if (micBtn) {
+  micBtn.addEventListener('click', () => {
+    micBtn.classList.toggle('listening');
+    if (micBtn.classList.contains('listening')) {
+      statusText.textContent = "🎙️ Listening... Speak your command to Fuli";
+      setExpanded(true, 130);
+      if (window.fuliAPI && window.fuliAPI.triggerMicListen) {
+        window.fuliAPI.triggerMicListen();
+      }
+    } else {
+      setExpanded(false);
+    }
   });
 }
 
@@ -133,6 +183,7 @@ promptInput.addEventListener('keydown', (e) => {
     if (isRunning) {
       stopExecution();
     } else {
+      resetToCleanState();
       window.fuliAPI.hideWindow();
     }
   }

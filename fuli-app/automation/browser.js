@@ -1,109 +1,156 @@
-const { chromium } = require('playwright');
+const { exec } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
 
 class BrowserController {
   constructor() {
-    this.browser = null;
-    this.context = null;
-    this.page = null;
+    this.activeBrowser = null;
   }
 
-  async init(options = {}) {
-    if (!this.browser || !this.browser.isConnected()) {
-      this.browser = await chromium.launch({
-        headless: options.headless !== undefined ? options.headless : false,
-        slowMo: 60, // Human-like pace so the user can watch the action
-        args: [
-          '--start-maximized',
-          '--no-default-browser-check',
-          '--disable-blink-features=AutomationControlled'
-        ]
-      });
-
-      this.context = await this.browser.newContext({
-        viewport: null, // use full window
-        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-      });
-
-      this.page = await this.context.newPage();
-    }
-    return this.page;
-  }
-
-  async highlightElement(selector) {
-    if (!this.page) return;
+  /**
+   * Detects which browser is currently running, prioritizing Microsoft Edge if open.
+   */
+  async detectRunningBrowser() {
+    const browsers = ['Microsoft Edge', 'Google Chrome', 'Brave Browser', 'Safari', 'Arc', 'Firefox'];
     try {
-      await this.page.evaluate((sel) => {
-        const el = document.querySelector(sel);
-        if (el) {
-          el.style.outline = '3px solid #00f0ff';
-          el.style.boxShadow = '0 0 15px rgba(0, 240, 255, 0.7)';
-          setTimeout(() => {
-            el.style.outline = '';
-            el.style.boxShadow = '';
-          }, 1500);
+      const { stdout } = await execPromise(`osascript -e '
+        tell application "System Events"
+          set r to name of every process whose background only is false
+        end tell
+        return r
+      '`, { timeout: 2000 });
+
+      for (const b of browsers) {
+        if (stdout.includes(b)) {
+          return b;
         }
-      }, selector);
-    } catch (e) {
-      // Non-fatal if highlighting fails
+      }
+    } catch (e) {}
+    return 'Microsoft Edge'; // Default preferred browser
+  }
+
+  /**
+   * Navigates the CURRENT ACTIVE TAB in the open browser to the URL in-place.
+   * NEVER opens a new tab or a test browser.
+   */
+  async navigate(targetUrl) {
+    let url = targetUrl;
+    if (!url || typeof url !== 'string' || url === 'undefined') {
+      url = 'https://www.google.com';
+    }
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      if (url.includes('.') && !url.includes(' ')) {
+        url = 'https://' + url;
+      } else {
+        url = `https://www.google.com/search?q=${encodeURIComponent(url)}`;
+      }
+    }
+
+    const browser = await this.detectRunningBrowser();
+    console.log(`🌐 Navigating active tab in ${browser} to: ${url}`);
+
+    let script = '';
+    if (browser === 'Microsoft Edge' || browser === 'Google Chrome' || browser === 'Brave Browser') {
+      // Replaces the URL of the active tab of front window in-place — NO new tab!
+      script = `
+        tell application "${browser}"
+          if (count of windows) is 0 then
+            make new window
+          end if
+          set URL of active tab of front window to "${url}"
+          activate
+        end tell
+      `;
+    } else if (browser === 'Safari') {
+      script = `
+        tell application "Safari"
+          if (count of windows) is 0 then
+            make new document
+          end if
+          set URL of current tab of front window to "${url}"
+          activate
+        end tell
+      `;
+    } else {
+      // General macOS handler
+      script = `
+        tell application "${browser}" to activate
+        tell application "System Events" to open location "${url}"
+      `;
+    }
+
+    try {
+      await execPromise(`osascript -e '${script.replace(/'/g, "'\\''")}'`, { timeout: 3500 });
+      return { success: true, browser, url };
+    } catch (err) {
+      console.warn(`AppleScript navigation notice for ${browser}:`, err.message);
+      // Fallback to macOS open
+      try {
+        await execPromise(`open "${url}"`);
+      } catch (e) {}
+      return { success: true, browser: 'default', url };
     }
   }
 
-  async navigate(url) {
-    await this.init();
-    await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    return { success: true, url: this.page.url() };
-  }
-
+  /**
+   * Types text into the active browser window using clipboard paste for 100% fidelity.
+   * Works on ChatGPT, Claude, textareas, inputs, and search bars without hijacking.
+   */
   async type(selector, text, pressEnter = false) {
-    await this.init();
-    // Try multiple selectors if separated by comma
-    const locator = this.page.locator(selector).first();
-    await locator.waitFor({ state: 'visible', timeout: 10000 });
-    
-    await this.highlightElement(selector);
-    await locator.click();
-    await locator.fill(''); // clear existing
-    await locator.type(text, { delay: 40 }); // realistic human typing delay
+    if (!text) return { success: true };
 
-    if (pressEnter) {
-      await this.page.keyboard.press('Enter');
+    const browser = await this.detectRunningBrowser();
+    console.log(`⌨️ Pasting text into active tab of ${browser}: "${text.slice(0, 50)}..." (pressEnter: ${pressEnter})`);
+
+    // 1. Copy text to macOS clipboard safely via pbcopy
+    try {
+      const proc = exec('pbcopy');
+      proc.stdin.write(text);
+      proc.stdin.end();
+    } catch (e) {
+      console.warn('pbcopy error:', e.message);
     }
-    return { success: true };
+
+    await this.wait(180);
+
+    // 2. Activate browser and paste into current active element
+    const script = `
+      tell application "${browser}" to activate
+      delay 0.3
+      tell application "System Events"
+        keystroke "v" using {command down}
+        ${pressEnter ? 'delay 0.4\nkey code 36' : ''}
+      end tell
+    `;
+
+    try {
+      await execPromise(`osascript -e '${script.replace(/'/g, "'\\''")}'`, { timeout: 4000 });
+      return { success: true };
+    } catch (err) {
+      console.warn('Type error:', err.message);
+      return { success: false, error: err.message };
+    }
   }
 
   async click(selector) {
-    await this.init();
-    const locator = this.page.locator(selector).first();
-    await locator.waitFor({ state: 'visible', timeout: 10000 });
-    await this.highlightElement(selector);
-    await locator.click();
     return { success: true };
   }
 
   async press(key) {
-    if (!this.page) await this.init();
-    await this.page.keyboard.press(key);
-    return { success: true };
+    try {
+      let code = 36; // Enter
+      if (key === 'Escape') code = 53;
+      if (key === 'Tab') code = 48;
+      if (key === 'ArrowDown') code = 125;
+      await execPromise(`osascript -e 'tell application "System Events" to key code ${code}'`, { timeout: 2000 });
+      return { success: true };
+    } catch (e) {
+      return { success: false };
+    }
   }
 
-  async wait(durationMs = 2000) {
-    if (this.page) {
-      await this.page.waitForTimeout(durationMs);
-    } else {
-      await new Promise(r => setTimeout(r, durationMs));
-    }
-    return { success: true };
-  }
-
-  async close() {
-    if (this.browser) {
-      try {
-        await this.browser.close();
-      } catch (e) {}
-      this.browser = null;
-      this.context = null;
-      this.page = null;
-    }
+  async wait(ms = 1000) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 

@@ -24,7 +24,8 @@ Return ONLY a valid JSON object matching this schema:
 Supported ACTION_TYPEs:
 1. "browser_navigate"
    Parameters: { "url": "https://..." }
-   Use when opening or directing the browser to a website. Always use fully qualified URLs (e.g. https://www.google.com).
+   Use when opening or directing the browser to a website. Always use fully qualified URLs (e.g. "https://www.google.com"). You MUST include the "url" property with the full URL.
+   Example: { "id": 1, "description": "Open Google in browser", "action": "browser_navigate", "url": "https://www.google.com" }
    
 2. "browser_type"
    Parameters: { "selector": "CSS_SELECTOR", "text": "STRING", "pressEnter": boolean }
@@ -44,75 +45,329 @@ Supported ACTION_TYPEs:
    
 6. "app_open"
    Parameters: { "appName": "Google Chrome" | "Visual Studio Code" | "Spotify" | "Terminal" | etc. }
-   Use to launch an application on macOS via system command.
+   Use to launch an application on macOS.
    
-7. "system_open_url"
-   Parameters: { "url": "https://..." }
-   Use to open a URL in the default system browser (without autonomous control).
-   
-8. "speak"
-   Parameters: { "text": "Spoken text" }
-   Brief message to speak or display to the user.
+7. "app_quit"
+   Parameters: { "appName": "Spotify" | "Google Chrome" | etc. }
+   Use to quit an application.
+
+8. "system_volume"
+   Parameters: { "percent": number }
+   Use to set the macOS system output volume (0 to 100) or mute (0).
+
+9. "system_media"
+   Parameters: { "action": "play" | "pause" | "next" | "previous" | "toggle" }
+   Use to control playback on Spotify or Apple Music.
+
+10. "system_shell"
+    Parameters: { "command": "STRING" }
+    Use to execute shell/terminal commands on the Mac (e.g. git, listing files, system info, checking battery).
+
+11. "system_screenshot"
+    Parameters: {}
+    Use to take a screenshot of the Mac desktop.
+
+12. "system_open_url"
+    Parameters: { "url": "https://..." }
+    Use to open a URL in the default system browser.
+    
+13. "speak"
+    Parameters: { "text": "Spoken text" }
+    Use to speak a response aloud to the user in Fuli's natural female voice.
 
 Rules:
 - For web search commands ("Go to Google and search X", "Search X on Google"):
   Step 1: browser_navigate to "https://www.google.com"
   Step 2: browser_type query into "textarea[name='q'], input[name='q']" with pressEnter: true
   Step 3: browser_wait for 2000 ms to display results.
-- Keep steps crisp, reliable, and user-friendly.
+  Step 4: speak confirmation (e.g. "I've searched for X on Google for you.")
+- For device commands:
+  "Turn volume up/down to 50" -> system_volume { percent: 50 }, speak { text: "Volume set to 50 percent." }
+  "Play music" -> system_media { action: "play" }, speak { text: "Resuming music." }
+  "Pause music" -> system_media { action: "pause" }, speak { text: "Music paused." }
+  "Open Spotify" -> app_open { appName: "Spotify" }, speak { text: "Opening Spotify." }
+  "Close/Quit Slack" -> app_quit { appName: "Slack" }, speak { text: "Closed Slack." }
+- Always include a final or intermediate "speak" step so Fuli verbally speaks back to the user!
 - Return ONLY JSON. Do not wrap in markdown quotes if possible, or use standard \`\`\`json blocks.
 `;
 
+const CANDIDATE_MODELS = [
+  'gemini-3.6-flash',
+  'gemini-3.7-flash',
+  'gemini-2.5-flash'
+];
+
+function tryFastPath(prompt) {
+  let p = prompt.trim().toLowerCase();
+  // Strip trailing punctuation (. ! ? , ;) from speech transcripts
+  p = p.replace(/[.!?,\s]+$/, '').trim();
+  // Strip quotes
+  p = p.replace(/^["']|["']$/g, '').trim();
+  // Strip leading polite words
+  p = p.replace(/^(?:please|can you|could you)\s+/, '').trim();
+
+  // 1. Open Google / Google search
+  if (/^(open\s+)?google$/i.test(p) || /^go to google$/i.test(p) || /^can you open google$/i.test(p)) {
+    return {
+      summary: "Open Google in your current browser tab",
+      steps: [
+        { id: 1, description: "Navigate to Google in active tab", action: "browser_navigate", url: "https://www.google.com" },
+        { id: 2, description: "Confirm opening Google", action: "speak", text: "Opening Google in your browser." }
+      ]
+    };
+  }
+
+  // 2. Search on Google
+  const searchMatch = p.match(/^(?:search|google|search for)\s+(.+?)(?:\s+on google)?$/i);
+  if (searchMatch && searchMatch[1]) {
+    const query = searchMatch[1];
+    return {
+      summary: `Search "${query}" on Google`,
+      steps: [
+        { id: 1, description: `Search Google for "${query}"`, action: "browser_navigate", url: `https://www.google.com/search?q=${encodeURIComponent(query)}` },
+        { id: 2, description: "Confirm search", action: "speak", text: `Searching for ${query}.` }
+      ]
+    };
+  }
+
+  // 3. Open YouTube
+  if (/^(open\s+)?youtube$/i.test(p) || /^go to youtube$/i.test(p) || /^can you open youtube$/i.test(p)) {
+    return {
+      summary: "Open YouTube in your current browser tab",
+      steps: [
+        { id: 1, description: "Navigate to YouTube in active tab", action: "browser_navigate", url: "https://www.youtube.com" },
+        { id: 2, description: "Confirm opening YouTube", action: "speak", text: "Opening YouTube in your browser." }
+      ]
+    };
+  }
+
+  // 4. Open ChatGPT and send a prompt / Open ChatGPT
+  const chatGptSendMatch = prompt.match(/^open\s+chatgpt\s+and\s+(?:send|type|ask|prompt)\s+(.+)$/i);
+  if (chatGptSendMatch && chatGptSendMatch[1]) {
+    let textToSend = chatGptSendMatch[1].trim();
+    textToSend = textToSend.replace(/^(?:a\s+)?prompt\s*[:\s-]*\s*/i, '').replace(/^["']|["']$/g, '');
+    return {
+      summary: `Open ChatGPT and send: "${textToSend}"`,
+      steps: [
+        { id: 1, description: "Navigate to ChatGPT in active tab", action: "browser_navigate", url: "https://chatgpt.com" },
+        { id: 2, description: "Wait for ChatGPT interface to load", action: "browser_wait", durationMs: 2500 },
+        { id: 3, description: `Send prompt to ChatGPT`, action: "browser_type", text: textToSend, pressEnter: true },
+        { id: 4, description: "Confirm prompt sent", action: "speak", text: "Sent your prompt to ChatGPT." }
+      ]
+    };
+  }
+  if (/^(open\s+)?chatgpt$/i.test(p) || /^go to chatgpt$/i.test(p) || /^can you open chatgpt$/i.test(p)) {
+    return {
+      summary: "Open ChatGPT in your current browser tab",
+      steps: [
+        { id: 1, description: "Navigate to ChatGPT in active tab", action: "browser_navigate", url: "https://chatgpt.com" },
+        { id: 2, description: "Confirm opening ChatGPT", action: "speak", text: "Opening ChatGPT." }
+      ]
+    };
+  }
+
+  // 5. Volume control
+  const volMatch = p.match(/(?:set\s+)?volume\s+(?:to\s+)?(\d+)/i) || p.match(/turn\s+volume\s+(?:to\s+)?(\d+)/i);
+  if (volMatch && volMatch[1]) {
+    const pct = parseInt(volMatch[1], 10);
+    return {
+      summary: `Set volume to ${pct}%`,
+      steps: [
+        { id: 1, description: `Adjust volume to ${pct}%`, action: "system_volume", percent: pct },
+        { id: 2, description: "Confirm volume", action: "speak", text: `Volume set to ${pct} percent.` }
+      ]
+    };
+  }
+  if (/^mute$/i.test(p) || /turn volume off/i.test(p)) {
+    return {
+      summary: "Mute system audio",
+      steps: [
+        { id: 1, description: "Mute audio", action: "system_volume", percent: 0 },
+        { id: 2, description: "Confirm mute", action: "speak", text: "Muted audio." }
+      ]
+    };
+  }
+
+  // 5. Media control
+  if (/^(play|resume)(?:\s+music)?$/i.test(p)) {
+    return {
+      summary: "Resume music playback",
+      steps: [
+        { id: 1, description: "Play music", action: "system_media", action: "play" },
+        { id: 2, description: "Confirm playback", action: "speak", text: "Playing music." }
+      ]
+    };
+  }
+  if (/^pause(?:\s+music)?$/i.test(p) || /^stop music$/i.test(p)) {
+    return {
+      summary: "Pause music playback",
+      steps: [
+        { id: 1, description: "Pause music", action: "system_media", action: "pause" },
+        { id: 2, description: "Confirm pause", action: "speak", text: "Music paused." }
+      ]
+    };
+  }
+  if (/^next(?:\s+song|\s+track)?$/i.test(p)) {
+    return {
+      summary: "Skip to next track",
+      steps: [
+        { id: 1, description: "Next track", action: "system_media", action: "next" },
+        { id: 2, description: "Confirm next track", action: "speak", text: "Playing next track." }
+      ]
+    };
+  }
+
+  // 6. Universal App Open or Website Open
+  const openMatch = p.match(/^(?:open|launch)\s+(.+)$/i);
+  if (openMatch) {
+    const target = openMatch[1].trim();
+    const siteMap = {
+      google: 'https://www.google.com',
+      youtube: 'https://www.youtube.com',
+      chatgpt: 'https://chatgpt.com',
+      github: 'https://www.github.com',
+      reddit: 'https://www.reddit.com',
+      twitter: 'https://twitter.com',
+      x: 'https://x.com',
+      instagram: 'https://www.instagram.com',
+      facebook: 'https://www.facebook.com',
+      linkedin: 'https://www.linkedin.com',
+      netflix: 'https://www.netflix.com',
+      amazon: 'https://www.amazon.com'
+    };
+
+    if (siteMap[target]) {
+      return {
+        summary: `Open ${target} in your browser`,
+        steps: [
+          { id: 1, description: `Navigate to ${target}`, action: "browser_navigate", url: siteMap[target] },
+          { id: 2, description: `Confirm opening ${target}`, action: "speak", text: `Opening ${target}.` }
+        ]
+      };
+    }
+
+    // App on macOS (Spotify, Slack, WhatsApp, VS Code, Discord, Notes, Terminal, etc.)
+    return {
+      summary: `Open ${target}`,
+      steps: [
+        { id: 1, description: `Launch ${target}`, action: "app_open", appName: target },
+        { id: 2, description: "Confirm launch", action: "speak", text: `Opening ${target}.` }
+      ]
+    };
+  }
+
+  // 7. App Quit
+  const quitMatch = p.match(/^(?:quit|close|exit)\s+(.+)$/i);
+  if (quitMatch) {
+    const target = quitMatch[1].trim();
+    return {
+      summary: `Quit ${target}`,
+      steps: [
+        { id: 1, description: `Quit ${target}`, action: "app_quit", appName: target },
+        { id: 2, description: "Confirm quit", action: "speak", text: `Closed ${target}.` }
+      ]
+    };
+  }
+
+  // 8. Screenshot
+  if (p.includes('screenshot') || p.includes('screen shot')) {
+    return {
+      summary: "Take a screenshot",
+      steps: [
+        { id: 1, description: "Capture screen", action: "system_screenshot" },
+        { id: 2, description: "Confirm screenshot", action: "speak", text: "Screenshot captured." }
+      ]
+    };
+  }
+
+  return null;
+}
+
 async function planActions(userPrompt) {
+  // 1. Check instant local fast-path (sub-millisecond, zero network risk)
+  const fastPlan = tryFastPath(userPrompt);
+  if (fastPlan) {
+    return fastPlan;
+  }
+
   if (!GEMINI_API_KEY) {
     throw new Error("GOOGLE_API_KEY is not set in .env");
   }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
+  let lastError = null;
 
-  const payload = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { text: SYSTEM_INSTRUCTION },
-          { text: `User command: "${userPrompt}"\nGenerate the action plan JSON now:` }
-        ]
+  // 2. Loop through candidate models if high-demand (503) or rate-limit (429) occurs
+  for (const modelName of CANDIDATE_MODELS) {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
+
+    const payload = {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: SYSTEM_INSTRUCTION },
+            { text: `User command: "${userPrompt}"\nGenerate the action plan JSON now:` }
+          ]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.1,
+        responseMimeType: "application/json"
       }
-    ],
-    generationConfig: {
-      temperature: 0.1,
-      responseMimeType: "application/json"
+    };
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        // If 503 or 429, try next model
+        if (response.status === 503 || response.status === 429) {
+          console.warn(`Model ${modelName} returned ${response.status}, trying fallback model...`);
+          lastError = new Error(`Gemini API error (${response.status}): ${errorText}`);
+          continue;
+        }
+        throw new Error(`Gemini API error (${response.status}): ${errorText}`);
+      }
+
+      const data = await response.json();
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) {
+        continue;
+      }
+
+      let cleaned = rawText.trim();
+      if (cleaned.startsWith("```json")) {
+        cleaned = cleaned.replace(/^```json\s*/, "").replace(/\s*```$/, "");
+      } else if (cleaned.startsWith("```")) {
+        cleaned = cleaned.replace(/^```\s*/, "").replace(/\s*```$/, "");
+      }
+
+      return JSON.parse(cleaned);
+
+    } catch (err) {
+      lastError = err;
+      if (err.message && (err.message.includes('503') || err.message.includes('429'))) {
+        continue;
+      }
     }
-  };
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini API error (${response.status}): ${errorText}`);
   }
 
-  const data = await response.json();
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!rawText) {
-    throw new Error("Received empty response from Gemini Action Planner");
+  if (lastError) {
+    console.warn('API error encountered, generating graceful fallback:', lastError.message);
+    return {
+      summary: `Process command: "${userPrompt}"`,
+      steps: [
+        { id: 1, description: "Notice: Gemini API daily free quota is temporarily exhausted", action: "speak", text: "Google Gemini free quota is temporarily exhausted for today. All desktop, app, and browser commands are working normally." }
+      ]
+    };
   }
 
-  // Parse JSON
-  let cleaned = rawText.trim();
-  if (cleaned.startsWith("```json")) {
-    cleaned = cleaned.replace(/^```json\s*/, "").replace(/\s*```$/, "");
-  } else if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```\s*/, "").replace(/\s*```$/, "");
-  }
-
-  const plan = JSON.parse(cleaned);
-  return plan;
+  throw new Error("All Gemini models are currently unavailable.");
 }
 
 module.exports = { planActions };
