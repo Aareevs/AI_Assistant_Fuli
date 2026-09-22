@@ -91,56 +91,193 @@ Rules:
 - Return ONLY JSON. Do not wrap in markdown quotes if possible, or use standard \`\`\`json blocks.
 `;
 
+const CANDIDATE_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash'
+];
+
+function tryFastPath(prompt) {
+  const p = prompt.trim().toLowerCase();
+
+  // 1. Open Google / Google search
+  if (/^(open\s+)?google$/i.test(p) || /^go to google$/i.test(p) || /^can you open google$/i.test(p)) {
+    return {
+      summary: "Open Google in your current browser tab",
+      steps: [
+        { id: 1, description: "Navigate to Google in active tab", action: "browser_navigate", url: "https://www.google.com" },
+        { id: 2, description: "Confirm opening Google", action: "speak", text: "Opening Google in your browser." }
+      ]
+    };
+  }
+
+  // 2. Search on Google
+  const searchMatch = p.match(/^(?:search|google|search for)\s+(.+?)(?:\s+on google)?$/i);
+  if (searchMatch && searchMatch[1]) {
+    const query = searchMatch[1];
+    return {
+      summary: `Search "${query}" on Google`,
+      steps: [
+        { id: 1, description: `Search Google for "${query}"`, action: "browser_navigate", url: `https://www.google.com/search?q=${encodeURIComponent(query)}` },
+        { id: 2, description: "Confirm search", action: "speak", text: `Searching for ${query}.` }
+      ]
+    };
+  }
+
+  // 3. Open YouTube
+  if (/^(open\s+)?youtube$/i.test(p) || /^go to youtube$/i.test(p) || /^can you open youtube$/i.test(p)) {
+    return {
+      summary: "Open YouTube in your current browser tab",
+      steps: [
+        { id: 1, description: "Navigate to YouTube in active tab", action: "browser_navigate", url: "https://www.youtube.com" },
+        { id: 2, description: "Confirm opening YouTube", action: "speak", text: "Opening YouTube in your browser." }
+      ]
+    };
+  }
+
+  // 4. Volume control
+  const volMatch = p.match(/(?:set\s+)?volume\s+(?:to\s+)?(\d+)/i) || p.match(/turn\s+volume\s+(?:to\s+)?(\d+)/i);
+  if (volMatch && volMatch[1]) {
+    const pct = parseInt(volMatch[1], 10);
+    return {
+      summary: `Set volume to ${pct}%`,
+      steps: [
+        { id: 1, description: `Adjust volume to ${pct}%`, action: "system_volume", percent: pct },
+        { id: 2, description: "Confirm volume", action: "speak", text: `Volume set to ${pct} percent.` }
+      ]
+    };
+  }
+  if (/^mute$/i.test(p) || /turn volume off/i.test(p)) {
+    return {
+      summary: "Mute system audio",
+      steps: [
+        { id: 1, description: "Mute audio", action: "system_volume", percent: 0 },
+        { id: 2, description: "Confirm mute", action: "speak", text: "Muted audio." }
+      ]
+    };
+  }
+
+  // 5. Media control
+  if (/^(play|resume)(?:\s+music)?$/i.test(p)) {
+    return {
+      summary: "Resume music playback",
+      steps: [
+        { id: 1, description: "Play music", action: "system_media", action: "play" },
+        { id: 2, description: "Confirm playback", action: "speak", text: "Playing music." }
+      ]
+    };
+  }
+  if (/^pause(?:\s+music)?$/i.test(p) || /^stop music$/i.test(p)) {
+    return {
+      summary: "Pause music playback",
+      steps: [
+        { id: 1, description: "Pause music", action: "system_media", action: "pause" },
+        { id: 2, description: "Confirm pause", action: "speak", text: "Music paused." }
+      ]
+    };
+  }
+  if (/^next(?:\s+song|\s+track)?$/i.test(p)) {
+    return {
+      summary: "Skip to next track",
+      steps: [
+        { id: 1, description: "Next track", action: "system_media", action: "next" },
+        { id: 2, description: "Confirm next track", action: "speak", text: "Playing next track." }
+      ]
+    };
+  }
+
+  // 6. App Open
+  const appOpenMatch = p.match(/^(?:open|launch)\s+(spotify|slack|discord|whatsapp|code|visual studio code|terminal|messages|notes|calculator|settings)$/i);
+  if (appOpenMatch) {
+    const app = appOpenMatch[1];
+    return {
+      summary: `Open ${app}`,
+      steps: [
+        { id: 1, description: `Launch ${app}`, action: "app_open", appName: app },
+        { id: 2, description: "Confirm launch", action: "speak", text: `Opening ${app}.` }
+      ]
+    };
+  }
+
+  return null;
+}
+
 async function planActions(userPrompt) {
+  // 1. Check instant local fast-path (sub-millisecond, zero network risk)
+  const fastPlan = tryFastPath(userPrompt);
+  if (fastPlan) {
+    return fastPlan;
+  }
+
   if (!GEMINI_API_KEY) {
     throw new Error("GOOGLE_API_KEY is not set in .env");
   }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
+  let lastError = null;
 
-  const payload = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { text: SYSTEM_INSTRUCTION },
-          { text: `User command: "${userPrompt}"\nGenerate the action plan JSON now:` }
-        ]
+  // 2. Loop through candidate models if high-demand (503) or rate-limit (429) occurs
+  for (const modelName of CANDIDATE_MODELS) {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
+
+    const payload = {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: SYSTEM_INSTRUCTION },
+            { text: `User command: "${userPrompt}"\nGenerate the action plan JSON now:` }
+          ]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.1,
+        responseMimeType: "application/json"
       }
-    ],
-    generationConfig: {
-      temperature: 0.1,
-      responseMimeType: "application/json"
+    };
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        // If 503 or 429, try next model
+        if (response.status === 503 || response.status === 429) {
+          console.warn(`Model ${modelName} returned ${response.status}, trying fallback model...`);
+          lastError = new Error(`Gemini API error (${response.status}): ${errorText}`);
+          continue;
+        }
+        throw new Error(`Gemini API error (${response.status}): ${errorText}`);
+      }
+
+      const data = await response.json();
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) {
+        continue;
+      }
+
+      let cleaned = rawText.trim();
+      if (cleaned.startsWith("```json")) {
+        cleaned = cleaned.replace(/^```json\s*/, "").replace(/\s*```$/, "");
+      } else if (cleaned.startsWith("```")) {
+        cleaned = cleaned.replace(/^```\s*/, "").replace(/\s*```$/, "");
+      }
+
+      return JSON.parse(cleaned);
+
+    } catch (err) {
+      lastError = err;
+      if (err.message && (err.message.includes('503') || err.message.includes('429'))) {
+        continue;
+      }
+      throw err;
     }
-  };
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini API error (${response.status}): ${errorText}`);
   }
 
-  const data = await response.json();
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!rawText) {
-    throw new Error("Received empty response from Gemini Action Planner");
-  }
-
-  // Parse JSON
-  let cleaned = rawText.trim();
-  if (cleaned.startsWith("```json")) {
-    cleaned = cleaned.replace(/^```json\s*/, "").replace(/\s*```$/, "");
-  } else if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```\s*/, "").replace(/\s*```$/, "");
-  }
-
-  const plan = JSON.parse(cleaned);
-  return plan;
+  throw lastError || new Error("All Gemini models are currently unavailable.");
 }
 
 module.exports = { planActions };
