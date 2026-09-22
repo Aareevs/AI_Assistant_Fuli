@@ -55,7 +55,7 @@ def speak_female_voice(text: str):
             pass
 
 
-def send_to_fuli_app(endpoint: str, payload: dict = None):
+def send_to_fuli_app(endpoint: str, payload: dict | None = None):
     """Sends command or show request to Fuli desktop app."""
     url = f"http://127.0.0.1:8765{endpoint}"
     try:

@@ -52,6 +52,39 @@ try {
   console.warn('Could not copy to /Applications:', e.message);
 }
 
+// 6. Register persistent macOS LaunchAgent so Fuli is always running like Spotlight
+const launchAgentsDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
+const launchAgentPlist = path.join(launchAgentsDir, 'com.aareev.fuli.plist');
+try {
+  fs.mkdirSync(launchAgentsDir, { recursive: true });
+  const plistXml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aareev.fuli</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/Fuli.app/Contents/MacOS/Fuli</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>`;
+  fs.writeFileSync(launchAgentPlist, plistXml);
+  try {
+    execSync(`launchctl unload "${launchAgentPlist}" 2>/dev/null || true`);
+    execSync(`launchctl load "${launchAgentPlist}"`);
+  } catch {}
+  console.log('✓ Registered macOS LaunchAgent (KeepAlive: true, RunAtLoad: true)');
+} catch (e) {
+  console.warn('LaunchAgent registration notice:', e.message);
+}
+
 // Refresh Finder / Dock icon cache for the app
 try {
   execSync(`touch "${bundlePath}"`);
