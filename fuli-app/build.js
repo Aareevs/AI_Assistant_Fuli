@@ -35,7 +35,8 @@ try {
   execSync(`/usr/libexec/PlistBuddy -c "Set :CFBundleName Fuli" "${plistPath}"`);
   execSync(`/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Fuli" "${plistPath}"`);
   execSync(`/usr/libexec/PlistBuddy -c "Set :CFBundleIconFile Fuli.icns" "${plistPath}"`);
-  console.log('✓ Set CFBundle metadata in Info.plist');
+  execSync(`/usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "${plistPath}" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "${plistPath}"`);
+  console.log('✓ Set CFBundle metadata & LSUIElement: true in Info.plist');
 } catch (e) {
   console.warn('PlistBuddy update note:', e.message);
 }

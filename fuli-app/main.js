@@ -139,11 +139,12 @@ function createTray() {
 }
 
 function createWindow() {
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width: screenWidth } = primaryDisplay.workAreaSize;
+  const cursorPoint = screen.getCursorScreenPoint();
+  const currentDisplay = screen.getDisplayNearestPoint(cursorPoint);
+  const { x: displayX, y: displayY, width: displayWidth } = currentDisplay.workArea;
 
-  const x = Math.round((screenWidth - DEFAULT_WIDTH) / 2);
-  const y = 140; // Pin near top like Spotlight / Raycast
+  const x = Math.round(displayX + (displayWidth - DEFAULT_WIDTH) / 2);
+  const y = displayY + 140; // Pin near top like Spotlight / Raycast
 
   mainWindow = new BrowserWindow({
     width: DEFAULT_WIDTH,
@@ -154,22 +155,25 @@ function createWindow() {
     transparent: true,
     alwaysOnTop: true,
     resizable: false,
-    skipTaskbar: false,
+    skipTaskbar: true,
+    hiddenInMissionControl: true,
     hasShadow: true,
     show: false,
+    type: 'panel', // macOS panel prevents space-switching when activating
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      backgroundThrottling: false
     }
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   // Ensure true floating always-on-top on macOS across desktops/spaces
-  mainWindow.setAlwaysOnTop(true, 'floating', 1);
+  mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
   if (mainWindow.setVisibleOnAllWorkspaces) {
-    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   }
 
   // Auto-dismiss on click outside (Spotlight behavior) when idle
@@ -209,18 +213,19 @@ function showWindow() {
   allowBlurHide = false;
   focusTimestamp = Date.now();
 
-  if (process.platform === 'darwin') {
-    app.focus({ steal: true });
+  // Dynamically locate the display and space where the user's cursor currently is
+  const cursorPoint = screen.getCursorScreenPoint();
+  const currentDisplay = screen.getDisplayNearestPoint(cursorPoint);
+  const { x: displayX, y: displayY, width: displayWidth } = currentDisplay.workArea;
+  const x = Math.round(displayX + (displayWidth - DEFAULT_WIDTH) / 2);
+  const y = displayY + 140;
+  mainWindow.setPosition(x, y);
+
+  // Ensure visible across all workspaces and over fullscreen windows without desktop switching
+  if (mainWindow.setVisibleOnAllWorkspaces) {
+    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   }
-
-  mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  mainWindow.setAlwaysOnTop(true, 'floating', 1);
-
-  // Re-center on active display
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width: screenWidth } = primaryDisplay.workAreaSize;
-  const x = Math.round((screenWidth - DEFAULT_WIDTH) / 2);
-  mainWindow.setPosition(x, 140);
+  mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
 
   mainWindow.show();
   mainWindow.focus();
@@ -302,13 +307,11 @@ function startVoiceOperator() {
 }
 
 app.whenReady().then(() => {
-  const iconPath = path.resolve(__dirname, 'renderer/assets/icon-128.png');
   if (process.platform === 'darwin' && app.dock) {
     try {
-      const dockIcon = nativeImage.createFromPath(iconPath);
-      app.dock.setIcon(dockIcon);
+      app.dock.hide();
     } catch (e) {
-      console.warn('Could not set dock icon:', e);
+      console.warn('Could not hide dock icon:', e);
     }
   }
 
