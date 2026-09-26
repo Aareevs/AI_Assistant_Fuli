@@ -21,7 +21,10 @@ for (const envPath of envCandidates) {
 const { actionExecutor } = require('./automation/executor');
 const http = require('http');
 
-const LOG_FILE = '/tmp/fuli_app.log';
+const isWin = process.platform === 'win32';
+const isMac = process.platform === 'darwin';
+
+const LOG_FILE = path.join(os.tmpdir(), 'fuli_app.log');
 function logFuli(...args) {
   const line = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
   try { fs.appendFileSync(LOG_FILE, line); } catch(e) {}
@@ -128,8 +131,9 @@ function createTray() {
   tray = new Tray(icon);
   tray.setToolTip('Fuli — AI Screen & Browser Operator (Click to toggle)');
 
+  const shortcutHint = isMac ? 'Option+Space' : 'Alt+Space';
   const contextMenu = Menu.buildFromTemplate([
-    { label: '⚡ Show / Hide Fuli (Cmd+Shift+Space)', click: toggleWindow },
+    { label: `⚡ Show / Hide Fuli (${shortcutHint})`, click: toggleWindow },
     { type: 'separator' },
     { label: 'Quit Fuli', click: () => app.quit() }
   ]);
@@ -144,7 +148,7 @@ function createWindow() {
   const { x: displayX, y: displayY, width: displayWidth } = currentDisplay.workArea;
 
   const x = Math.round(displayX + (displayWidth - DEFAULT_WIDTH) / 2);
-  const y = displayY + 140; // Pin near top like Spotlight / Raycast
+  const y = displayY + 140; // Pin near top like Spotlight / Raycast / PowerToys Run
 
   mainWindow = new BrowserWindow({
     width: DEFAULT_WIDTH,
@@ -156,10 +160,10 @@ function createWindow() {
     alwaysOnTop: true,
     resizable: false,
     skipTaskbar: true,
-    hiddenInMissionControl: true,
+    hiddenInMissionControl: isMac,
     hasShadow: true,
     show: false,
-    type: 'panel', // macOS panel prevents space-switching when activating
+    type: isMac ? 'panel' : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -170,13 +174,13 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
-  // Ensure true floating always-on-top on macOS across desktops/spaces
-  mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
-  if (mainWindow.setVisibleOnAllWorkspaces) {
+  // Ensure true floating always-on-top across desktops/workspaces
+  mainWindow.setAlwaysOnTop(true, isMac ? 'screen-saver' : 'pop-up-menu', 1);
+  if (isMac && mainWindow.setVisibleOnAllWorkspaces) {
     mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   }
 
-  // Auto-dismiss on click outside (Spotlight behavior) when idle
+  // Auto-dismiss on click outside when idle
   mainWindow.on('show', () => {
     allowBlurHide = false;
     focusTimestamp = Date.now();
@@ -184,7 +188,6 @@ function createWindow() {
 
   mainWindow.on('focus', () => {
     focusTimestamp = Date.now();
-    // Only allow blur to hide after being focused for at least 400ms
     setTimeout(() => {
       allowBlurHide = true;
     }, 400);
@@ -198,7 +201,7 @@ function createWindow() {
     }
   });
 
-  // Never destroy window on close; hide it so Option+Space always works
+  // Never destroy window on close; hide it so hotkey always works
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
       event.preventDefault();
@@ -213,7 +216,7 @@ function showWindow() {
   allowBlurHide = false;
   focusTimestamp = Date.now();
 
-  // Dynamically locate the display and space where the user's cursor currently is
+  // Dynamically locate the display where the user's cursor currently is
   const cursorPoint = screen.getCursorScreenPoint();
   const currentDisplay = screen.getDisplayNearestPoint(cursorPoint);
   const { x: displayX, y: displayY, width: displayWidth } = currentDisplay.workArea;
@@ -221,11 +224,10 @@ function showWindow() {
   const y = displayY + 140;
   mainWindow.setPosition(x, y);
 
-  // Ensure visible across all workspaces and over fullscreen windows without desktop switching
-  if (mainWindow.setVisibleOnAllWorkspaces) {
+  if (isMac && mainWindow.setVisibleOnAllWorkspaces) {
     mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   }
-  mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+  mainWindow.setAlwaysOnTop(true, isMac ? 'screen-saver' : 'pop-up-menu', 1);
 
   mainWindow.show();
   mainWindow.focus();
@@ -250,9 +252,9 @@ function toggleWindow() {
 
 function startVoiceOperator() {
   const possibleScriptPaths = [
-    path.join(os.homedir(), 'VS-Code/AI_Assistant_Fuli/fuli/voice_operator.py'),
-    path.resolve(__dirname, '../fuli/voice_operator.py'),
-    path.resolve(__dirname, '../../fuli/voice_operator.py')
+    path.join(os.homedir(), 'VS-Code', 'AI_Assistant_Fuli', 'fuli', 'voice_operator.py'),
+    path.resolve(__dirname, '..', 'fuli', 'voice_operator.py'),
+    path.resolve(__dirname, '..', '..', 'fuli', 'voice_operator.py')
   ];
 
   let scriptPath = null;
@@ -269,23 +271,50 @@ function startVoiceOperator() {
   }
 
   const projectDir = path.dirname(path.dirname(scriptPath));
-  const uvPath = fs.existsSync('/opt/homebrew/bin/uv') ? '/opt/homebrew/bin/uv' : 'uv';
+
+  // Determine uv path cross-platform
+  let uvPath = 'uv';
+  if (isWin) {
+    const winUvPaths = [
+      path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'uv', 'uv.exe'),
+      path.join(os.homedir(), '.cargo', 'bin', 'uv.exe')
+    ];
+    for (const p of winUvPaths) {
+      if (fs.existsSync(p)) {
+        uvPath = p;
+        break;
+      }
+    }
+  } else if (isMac) {
+    if (fs.existsSync('/opt/homebrew/bin/uv')) {
+      uvPath = '/opt/homebrew/bin/uv';
+    } else if (fs.existsSync('/usr/local/bin/uv')) {
+      uvPath = '/usr/local/bin/uv';
+    }
+  }
 
   logFuli(`Starting voice operator daemon with: ${uvPath} at ${projectDir}`);
 
   // Kill old zombie processes first
   try {
     const { execSync } = require('child_process');
-    execSync('pkill -f "python.*voice_operator" || true');
+    if (isWin) {
+      execSync('powershell -NoProfile -Command "Get-Process python* -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like \'*voice_operator*\' } | Stop-Process -Force"', { stdio: 'ignore' });
+    } else {
+      execSync('pkill -f "python.*voice_operator" || true', { stdio: 'ignore' });
+    }
   } catch (e) {}
 
   const { spawn } = require('child_process');
+  const spawnEnv = { ...process.env };
+  if (isMac) {
+    spawnEnv.PATH = `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || ''}`;
+  }
+
   voiceProcess = spawn(uvPath, ['run', 'python', '-m', 'fuli.voice_operator'], {
     cwd: projectDir,
-    env: {
-      ...process.env,
-      PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`
-    },
+    env: spawnEnv,
+    windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -315,6 +344,14 @@ app.whenReady().then(() => {
     }
   }
 
+  // Set seamless launch on system login for background availability
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: true,
+      openAsHidden: true
+    });
+  } catch (e) {}
+
   createWindow();
   createTray();
   startLocalCommandServer();
@@ -328,7 +365,7 @@ app.whenReady().then(() => {
     });
   }
 
-  // Register global shortcuts: Alt+Space, Option+Space, Cmd+Shift+Space, Cmd+Alt+Space
+  // Register global shortcuts: Alt+Space (Windows standard), Option+Space (Mac standard), etc.
   const shortcutsToRegister = [
     'Alt+Space',
     'Option+Space',

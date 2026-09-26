@@ -2,6 +2,9 @@ const { exec } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
 
+const isWin = process.platform === 'win32';
+const isMac = process.platform === 'darwin';
+
 class BrowserController {
   constructor() {
     this.activeBrowser = null;
@@ -11,6 +14,18 @@ class BrowserController {
    * Detects which browser is currently running, prioritizing Microsoft Edge if open.
    */
   async detectRunningBrowser() {
+    if (isWin) {
+      try {
+        const { stdout } = await execPromise(`powershell -NoProfile -Command "Get-Process | Select-Object -ExpandProperty ProcessName"`, { timeout: 2500 });
+        if (/msedge/i.test(stdout)) return 'msedge';
+        if (/chrome/i.test(stdout)) return 'chrome';
+        if (/brave/i.test(stdout)) return 'brave';
+        if (/firefox/i.test(stdout)) return 'firefox';
+      } catch (e) {}
+      return 'msedge';
+    }
+
+    // macOS detection
     const browsers = ['Microsoft Edge', 'Google Chrome', 'Brave Browser', 'Safari', 'Arc', 'Firefox'];
     try {
       const { stdout } = await execPromise(`osascript -e '
@@ -26,12 +41,12 @@ class BrowserController {
         }
       }
     } catch (e) {}
-    return 'Microsoft Edge'; // Default preferred browser
+    return 'Microsoft Edge';
   }
 
   /**
    * Navigates the CURRENT ACTIVE TAB in the open browser to the URL in-place.
-   * NEVER opens a new tab or a test browser.
+   * NEVER opens a new tab or a test browser. Works on both Windows and macOS.
    */
   async navigate(targetUrl) {
     let url = targetUrl;
@@ -49,9 +64,37 @@ class BrowserController {
     const browser = await this.detectRunningBrowser();
     console.log(`🌐 Navigating active tab in ${browser} to: ${url}`);
 
+    if (isWin) {
+      const appTitle = browser === 'msedge' ? 'Edge' : (browser === 'chrome' ? 'Chrome' : browser);
+      // In-place navigation on Windows: Activate browser, Ctrl+L (focus address bar), paste URL, Enter
+      const psCommand = `
+        $w = New-Object -ComObject WScript.Shell
+        if ($w.AppActivate('${appTitle}')) {
+          Start-Sleep -Milliseconds 180
+          $w.SendKeys('^l')
+          Start-Sleep -Milliseconds 120
+          Set-Clipboard -Value '${url}'
+          $w.SendKeys('^v{ENTER}')
+        } else {
+          Start-Process '${browser}' '${url}'
+        }
+      `.replace(/\n/g, ' ');
+
+      try {
+        await execPromise(`powershell -NoProfile -Command "${psCommand}"`, { timeout: 4000 });
+        return { success: true, browser, url };
+      } catch (err) {
+        console.warn(`Windows browser navigation notice:`, err.message);
+        try {
+          await execPromise(`start "" "${url}"`);
+        } catch (e) {}
+        return { success: true, browser: 'default', url };
+      }
+    }
+
+    // macOS AppleScript in-place navigation
     let script = '';
     if (browser === 'Microsoft Edge' || browser === 'Google Chrome' || browser === 'Brave Browser') {
-      // Replaces the URL of the active tab of front window in-place — NO new tab!
       script = `
         tell application "${browser}"
           if (count of windows) is 0 then
@@ -72,7 +115,6 @@ class BrowserController {
         end tell
       `;
     } else {
-      // General macOS handler
       script = `
         tell application "${browser}" to activate
         tell application "System Events" to open location "${url}"
@@ -84,7 +126,6 @@ class BrowserController {
       return { success: true, browser, url };
     } catch (err) {
       console.warn(`AppleScript navigation notice for ${browser}:`, err.message);
-      // Fallback to macOS open
       try {
         await execPromise(`open "${url}"`);
       } catch (e) {}
@@ -102,7 +143,29 @@ class BrowserController {
     const browser = await this.detectRunningBrowser();
     console.log(`⌨️ Pasting text into active tab of ${browser}: "${text.slice(0, 50)}..." (pressEnter: ${pressEnter})`);
 
-    // 1. Copy text to macOS clipboard safely via pbcopy
+    if (isWin) {
+      const appTitle = browser === 'msedge' ? 'Edge' : (browser === 'chrome' ? 'Chrome' : browser);
+      const escapedText = text.replace(/'/g, "''");
+      const psCommand = `
+        Set-Clipboard -Value '${escapedText}'
+        $w = New-Object -ComObject WScript.Shell
+        if ($w.AppActivate('${appTitle}')) {
+          Start-Sleep -Milliseconds 150
+          $w.SendKeys('^v')
+          ${pressEnter ? 'Start-Sleep -Milliseconds 250; $w.SendKeys("{ENTER}")' : ''}
+        }
+      `.replace(/\n/g, ' ');
+
+      try {
+        await execPromise(`powershell -NoProfile -Command "${psCommand}"`, { timeout: 4000 });
+        return { success: true };
+      } catch (err) {
+        console.warn('Windows type error:', err.message);
+        return { success: false, error: err.message };
+      }
+    }
+
+    // macOS implementation
     try {
       const proc = exec('pbcopy');
       proc.stdin.write(text);
@@ -113,7 +176,6 @@ class BrowserController {
 
     await this.wait(180);
 
-    // 2. Activate browser and paste into current active element
     const script = `
       tell application "${browser}" to activate
       delay 0.3
@@ -138,6 +200,15 @@ class BrowserController {
 
   async press(key) {
     try {
+      if (isWin) {
+        let keyString = '{ENTER}';
+        if (key === 'Escape') keyString = '{ESC}';
+        if (key === 'Tab') keyString = '{TAB}';
+        if (key === 'ArrowDown') keyString = '{DOWN}';
+        await execPromise(`powershell -NoProfile -Command "(New-Object -ComObject WScript.Shell).SendKeys('${keyString}')"`, { timeout: 2000 });
+        return { success: true };
+      }
+
       let code = 36; // Enter
       if (key === 'Escape') code = 53;
       if (key === 'Tab') code = 48;

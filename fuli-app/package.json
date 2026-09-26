@@ -6,6 +6,8 @@
   "scripts": {
     "start": "electron .",
     "build": "node build.js",
+    "build:win": "node build.js --platform=win32 --arch=x64",
+    "build:mac": "node build.js --platform=darwin --arch=arm64",
     "test:planner": "node test-planner.js"
   },
   "dependencies": {

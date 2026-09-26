@@ -7,6 +7,8 @@
     "app:npm": "cd fuli-app && npm start",
     "voice": "uv run python -m fuli.voice_operator",
     "build:app": "node fuli-app/build.js",
+    "build:win": "node fuli-app/build.js --platform=win32 --arch=x64",
+    "build:mac": "node fuli-app/build.js --platform=darwin --arch=arm64",
     "test:planner": "cd fuli-app && node test-planner.js",
     "test:browser": "cd fuli-app && node test-browser.js",
     "test:executor": "cd fuli-app && node test-executor.js"
