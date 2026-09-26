@@ -120,12 +120,22 @@ const DEFAULT_HEIGHT = 76; // compact prompt bar
 const EXPANDED_HEIGHT = 420; // when steps/progress are active
 
 function createTray() {
-  const trayIconPath = path.resolve(__dirname, 'renderer/assets/tray-icon.png');
+  const templatePath = path.resolve(__dirname, 'renderer/assets/tray-iconTemplate.png');
+  const standardPath = path.resolve(__dirname, 'renderer/assets/tray-icon.png');
+  const trayIconPath = fs.existsSync(templatePath) ? templatePath : standardPath;
+
   let icon = nativeImage.createFromPath(trayIconPath);
   
   if (icon.isEmpty()) {
-    const logoPath = path.resolve(__dirname, '../images/Fuli_Logo.png');
-    icon = nativeImage.createFromPath(logoPath).resize({ width: 18, height: 18 });
+    const taskbarPath = path.resolve(__dirname, '../images/Fuli_Taskbar_Icon.png');
+    if (fs.existsSync(taskbarPath)) {
+      icon = nativeImage.createFromPath(taskbarPath).resize({ width: 18, height: 18 });
+    }
+  }
+
+  // Set as macOS native template image so it automatically renders as a crisp white glyph in dark mode
+  if (isMac && !icon.isEmpty()) {
+    icon.setTemplateImage(true);
   }
 
   tray = new Tray(icon);
