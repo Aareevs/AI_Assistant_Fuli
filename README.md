@@ -1,40 +1,40 @@
-# Fuli — AI Desktop Operator & Voice Assistant (100% Free & Local)
+# Fuli — AI Desktop Operator & Voice Assistant (100% Free, Cross-Platform for Windows & macOS)
 
 <p align="center">
   <img src="images/Fuli_Logo.png" width="120" alt="Fuli Logo" />
 </p>
 
-Fuli is an agile, intelligent, autonomous macOS desktop operator and hands-free voice assistant. Designed as a permanent Spotlight/Raycast-style operator, Fuli controls your Mac, navigates your active browser in-place, launches and quits apps, manages playback, and responds verbally with a natural female voice—all at **$0.00 cost** (zero paid APIs required).
+Fuli is an agile, intelligent, autonomous desktop operator and hands-free voice assistant engineered for both **Windows** (10/11) and **macOS** (Apple Silicon & Intel). Designed as an always-available Spotlight/PowerToys-style floating operator, Fuli controls your computer, navigates your active browser in-place without opening duplicate tabs, launches and quits apps, manages media and volume, and speaks to you with a natural female voice—all at **$0.00 cost** (zero paid subscriptions or token bills).
 
 ---
 
 ## Key Features
 
-- **⚡ Instant Shortcut (`Option + Space`)**: Summon or dismiss Fuli instantly from anywhere on macOS, just like Spotlight (`Cmd + Space`).
-- **🎙️ Hands-Free Wake Word ("Fuli")**: Say *"Fuli"* to wake her up instantly (~250ms sliding-window detection) with a crisp 50ms tactile chime.
-- **🗣️ Natural Female Voice (Free)**: Conversational verbal feedback using Microsoft Edge Neural TTS (`en-US-AriaNeural`) and macOS native speech (`Samantha`).
-- **🌐 In-Place Browser Navigation**: Operates directly inside your **current open browser** (Microsoft Edge, Google Chrome, Safari). Reuses your existing tab in place—**no test browsers, no automation banners, and no unwanted new tabs**.
+- **⚡ Universal Hotkey (`Alt + Space` / `Option + Space`)**: Summon or dismiss Fuli instantly from anywhere on Windows or macOS.
+- **🎙️ Hands-Free Wake Word ("Fuli")**: Say *"Fuli"* or *"Hey Fuli"* to trigger wake-up instantly (~250ms sliding-window detection) accompanied by a crisp native tactile chime.
+- **🗣️ Natural Female Voice (Free)**: Real-time verbal feedback using Microsoft Edge Neural TTS (`en-US-AriaNeural`) with native offline speech fallbacks (Windows SAPI / macOS `Samantha`).
+- **🌐 In-Place Browser Navigation**: Operates directly inside your **currently active browser** (Microsoft Edge, Google Chrome, Brave, Safari). Reuses your existing tab in place—**no test browsers, no automation banners, and no duplicate tabs**.
 - **🤖 Autonomous Web App Interaction**: Paste and send prompts directly into **ChatGPT**, Claude, Google Search, and web forms with native clipboard fidelity.
-- **💻 Full macOS Device Control**:
-  - Launch and quit any application (*Spotify, VS Code, Slack, WhatsApp, Terminal, Discord, etc.*)
-  - System volume adjustment (0–100%) and mute/unmute
-  - Media playback controls (*Play, Pause, Next Track for Spotify & Apple Music*)
-  - Desktop screenshots and terminal command execution
-- **💰 100% Free Architecture ($0 Cost)**: Runs entirely on local Apple Silicon hardware and free provider tiers. Zero paid API subscriptions, zero token bills.
-- **🔄 24/7 Background Daemon**: Managed by macOS `launchd` (`com.aareev.fuli`). Boots automatically on login and revives in milliseconds. No terminal commands required to keep it alive.
+- **💻 Full Native OS Control (Windows & macOS)**:
+  - **Application Management**: Launch and terminate applications (*Spotify, VS Code, Slack, WhatsApp, Terminal, Discord, etc.*)
+  - **Master Volume**: Smooth volume adjustments (0–100%) and mute/unmute via Windows CoreAudio and macOS AppleScript
+  - **Media Keys**: Hardware-level virtual media keys (Play/Pause, Next Track, Previous Track) across any media player
+  - **Screen Capture**: Clean, silent desktop screenshots saved straight to your temporary directory or desktop
+- **💰 100% Free Architecture ($0 Cost)**: Runs completely on local hardware and free-tier APIs. Zero monthly fees, zero token bills.
+- **🔄 Always-On Background Daemon**: Starts on system login (Windows Startup / macOS `launchd`) and runs quietly in the background without needing a terminal open.
 
 ---
 
 ## Architecture & Zero-Cost Stack
 
-| Layer | Technology | Cost | Description |
-| :--- | :--- | :--- | :--- |
-| **Desktop UI** | Electron 35 + Glassmorphic CSS | Free | Floating, auto-centering prompt bar pinned to top of screen with dark glassmorphism. |
-| **Wake Word & STT** | `faster-whisper` (`tiny.en`) | **$0.00** | Runs locally on Apple Silicon (4 CPU threads, ~0.3s inference). 100% offline & private. |
-| **Voice Output (TTS)** | Microsoft Edge Neural TTS + macOS `Samantha` | **$0.00** | Crisp, natural female voice (`en-US-AriaNeural`). Zero subscription or API keys needed. |
-| **Browser Operator** | AppleScript + System Events | Free | Directly updates `active tab of front window` in Microsoft Edge / Chrome / Safari in-place. |
-| **Action Planner** | Local Fast-Path Engine + Gemini Flash Fallback | **$0.00** | Sub-millisecond rule engine for all everyday tasks; Gemini free tier for complex multi-step plans. |
-| **Daemon Manager** | macOS `launchd` LaunchAgent | Built-in | Always-on background daemon running `Fuli.app` and auto-spawning the voice operator. |
+| Layer | Technology | Platform | Cost | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **Desktop UI** | Electron 35 + Glassmorphic CSS | Win / Mac | Free | Floating, auto-centering prompt bar pinned to top of screen with dark glassmorphism. |
+| **Wake Word & STT** | `faster-whisper` (`tiny.en`) | Win / Mac | **$0.00** | Runs locally with 4 CPU threads (~0.25s inference). 100% offline & private. |
+| **Voice Output (TTS)** | Microsoft Edge Neural TTS + System SAPI/Samantha | Win / Mac | **$0.00** | Natural female voice (`en-US-AriaNeural`). Zero subscription or API keys needed. |
+| **Browser Operator** | Windows Script Host / PowerShell + AppleScript | Win / Mac | Free | Directly updates `active tab` in Edge / Chrome / Brave / Safari in-place. |
+| **Action Planner** | Local Fast-Path Engine + Gemini Flash Fallback | Win / Mac | **$0.00** | Sub-millisecond rule engine for everyday tasks; Gemini free tier for multi-step plans. |
+| **Background Runner**| Windows Startup / macOS `launchd` | Win / Mac | Built-in | Always-on background service running Fuli and auto-spawning the voice operator. |
 
 ---
 
@@ -43,13 +43,13 @@ Fuli is an agile, intelligent, autonomous macOS desktop operator and hands-free 
 ```text
 AI_Assistant_Fuli/
 ├── fuli-app/               # ⚡ Fuli Native Desktop Operator App
-│   ├── main.js             # Electron main process, hotkey registration (Option+Space), daemon runner
+│   ├── main.js             # Electron main process, hotkeys (Alt+Space/Option+Space), daemon runner
 │   ├── preload.js          # Secure IPC context bridge
-│   ├── build.js            # Native macOS .app packager & launchd agent installer
+│   ├── build.js            # Cross-platform packager for Windows (.exe) and macOS (.app)
 │   ├── automation/         # Local & Cloud action execution engine
 │   │   ├── planner.js      # Sub-millisecond fast-path parser & Gemini model fallback chain
-│   │   ├── browser.js      # Active browser tab controller (Edge/Chrome/Safari in-place)
-│   │   ├── system.js       # macOS native control (volume, media, apps, shell, screenshot)
+│   │   ├── browser.js      # Cross-platform browser controller (in-place tab navigation)
+│   │   ├── system.js       # Windows & macOS native control (volume, media, apps, screenshot)
 │   │   └── executor.js     # Sequential plan orchestrator with progress streaming
 │   └── renderer/           # Glassmorphic UI (HTML, CSS, JS) with dynamic resizing
 │
@@ -60,7 +60,7 @@ AI_Assistant_Fuli/
 │
 ├── server.py               # FastMCP server over SSE transport (:8000)
 ├── agent_fuli.py           # Optional LiveKit real-time voice agent
-├── package.json            # Desktop app scripts & build tooling
+├── package.json            # Desktop app scripts & cross-platform build tooling
 ├── pyproject.toml          # Python dependencies managed via uv
 └── .env                    # Credentials and user preferences
 ```
@@ -70,9 +70,11 @@ AI_Assistant_Fuli/
 ## Quick Start
 
 ### 1. Prerequisites
-- macOS (Apple Silicon M1/M2/M3/M4 recommended)
-- Node.js ≥ 18
-- Python ≥ 3.11 & [`uv`](https://github.com/astral-sh/uv) (`brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`)
+- **Operating System**: Windows 10/11 (x64 / arm64) OR macOS (Apple Silicon M1-M4 / Intel)
+- **Node.js**: ≥ 18
+- **Python**: ≥ 3.11 with [`uv`](https://github.com/astral-sh/uv)
+  - *macOS*: `brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`
+  - *Windows*: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
 
 ### 2. Setup
 
@@ -98,17 +100,23 @@ SERVER_NAME="Fuli"
 GOOGLE_API_KEY="your_free_google_ai_studio_key"
 ```
 
-### 3. Build & Install Native macOS Application
+### 3. Build & Install
 
-Build the standalone `/Applications/Fuli.app` bundle and register the 24/7 background LaunchAgent:
+#### For Windows:
 ```bash
-npm run build:app
+npm run build:win
 ```
+- Outputs standalone `dist/Fuli-win32-x64/Fuli.exe`.
+- Automatically installs to Windows Startup so Fuli launches on login in the background.
+- Toggle anytime with **`Alt + Space`**.
 
-Once built:
-- **`Option + Space`**: Press anywhere on your Mac to toggle Fuli.
-- **"Fuli"**: Speak out loud to wake Fuli hands-free.
-- Fuli starts automatically on macOS login and runs 24/7 without needing any terminal window open.
+#### For macOS:
+```bash
+npm run build:mac
+```
+- Packages `/Applications/Fuli.app`.
+- Registers a persistent macOS `launchd` background service.
+- Toggle anytime with **`Option + Space`**.
 
 ---
 
@@ -118,25 +126,24 @@ Once built:
 
 | Command Category | Example Spoken / Typed Prompt | Action Taken |
 | :--- | :--- | :--- |
-| **ChatGPT Automation** | *"Open ChatGPT and send prompt write a sci-fi prologue"* | Opens `chatgpt.com` in your open Edge tab, pastes the prompt into the chatbox, and presses Enter. |
-| **Website Navigation** | *"Open YouTube"* or *"Go to GitHub"* | Navigates your active browser tab directly to the website without creating new tabs. |
+| **ChatGPT Automation** | *"Open ChatGPT and send prompt write a sci-fi prologue"* | Opens `chatgpt.com` in your current browser tab, pastes prompt into chatbox, and presses Enter. |
+| **Website Navigation** | *"Open YouTube"* or *"Go to GitHub"* | Navigates your active browser tab directly in-place without opening new tabs. |
 | **Search** | *"Search quantum computing on Google"* | Directly searches Google in your active browser tab. |
-| **App Control** | *"Open Spotify"* / *"Launch VS Code"* / *"Quit Slack"* | Opens or closes the application natively on macOS. |
-| **Media Playback** | *"Play music"*, *"Pause music"*, *"Next song"* | Controls Spotify or Apple Music playback. |
-| **Audio Volume** | *"Set volume to 50"*, *"Turn volume up"*, *"Mute"* | Adjusts macOS system audio output volume. |
-| **Screen Capture** | *"Take a screenshot"* | Captures your screen and saves it directly to your Desktop. |
+| **App Control** | *"Open Spotify"* / *"Launch VS Code"* / *"Quit Slack"* | Opens or closes the application natively on Windows or macOS. |
+| **Media Playback** | *"Play music"*, *"Pause music"*, *"Next song"* | Sends universal media key events to resume, pause, or skip tracks. |
+| **Audio Volume** | *"Set volume to 50"*, *"Turn volume up"*, *"Mute"* | Adjusts master system output volume via CoreAudio / Windows Endpoint. |
+| **Screen Capture** | *"Take a screenshot"* | Captures the screen cleanly without camera flash noises. |
 
 ---
 
 ## Customization
 
 - **Form of Address**: Change `USER_NAME` in `.env` to whatever name you want Fuli to call you.
-- **Default Browser**: Fuli automatically checks for running browsers and prioritizes **Microsoft Edge**, falling back to **Google Chrome**, **Safari**, or your system default.
-- **Shortcuts**: Both `Option + Space` and `Cmd + Shift + Space` are globally registered.
+- **Default Browser**: Prioritizes **Microsoft Edge**, falling back to **Google Chrome**, **Brave**, **Safari**, or your system default.
+- **Shortcuts**: Both `Alt + Space` / `Option + Space` and `Ctrl/Cmd + Shift + Space` are active by default.
 
 ---
 
 ## License
 
 This project is licensed under the [MIT License](LICENSE) — see the [LICENSE](LICENSE) file for details.
-

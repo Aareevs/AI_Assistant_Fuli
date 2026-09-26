@@ -12,6 +12,7 @@ Ultra-fast real-time sliding-window wake-word ("Fuli" / "Hey Fuli") detection an
 import os
 import sys
 import time
+import tempfile
 import queue
 import collections
 import re
@@ -30,7 +31,7 @@ load_dotenv()
 USER_NAME = os.getenv("USER_NAME", "Aareev")
 SAMPLE_RATE = 16000
 BLOCK_SIZE = 1024
-SILENCE_THRESHOLD = 0.0035  # MacBook Air microphone sensitivity
+SILENCE_THRESHOLD = 0.0035  # Microphone sensitivity threshold
 SILENCE_DURATION = 0.55     # 550ms natural conversational pause for command completion
 
 # Expanded phonetic variations of "Fuli" recognized by Whisper
@@ -47,28 +48,48 @@ external_listen_requested = threading.Event()
 
 
 def play_chime():
-    """Plays an instant 50ms native macOS system chime. Does NOT block mic or drop audio frames."""
+    """Plays an instant native system chime. Does NOT block mic or drop audio frames."""
     try:
-        subprocess.Popen(['afplay', '/System/Library/Sounds/Tink.aiff'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if sys.platform == 'win32':
+            import winsound
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+        else:
+            subprocess.Popen(['afplay', '/System/Library/Sounds/Tink.aiff'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 
 
 def speak_female_voice(text: str):
-    """Speaks text using free high-quality neural female voice (AriaNeural) or macOS Samantha."""
+    """Speaks text using free high-quality neural female voice (AriaNeural) or native system TTS."""
     global is_speaking_out_loud
     if not text or not text.strip():
         return
     clean = text.replace('"', ' ').replace('\n', ' ').strip()
-    tmp_path = f"/tmp/fuli_voice_{int(time.time() * 1000)}.mp3"
+    tmp_path = os.path.join(tempfile.gettempdir(), f"fuli_voice_{int(time.time() * 1000)}.mp3")
     
     is_speaking_out_loud = True
     try:
-        cmd = f'uv run edge-tts --voice en-US-AriaNeural --text "{clean}" --write-media "{tmp_path}" && afplay "{tmp_path}" && rm -f "{tmp_path}"'
-        subprocess.run(cmd, shell=True, timeout=10, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if sys.platform == 'win32':
+            subprocess.run(f'uv run edge-tts --voice en-US-AriaNeural --text "{clean}" --write-media "{tmp_path}"', shell=True, timeout=10, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if os.path.exists(tmp_path):
+                escaped_path = tmp_path.replace('\\', '\\\\')
+                ps_cmd = f"powershell -NoProfile -Command \"Add-Type -AssemblyName presentationCore; $p = New-Object system.windows.media.mediaplayer; $p.open('{escaped_path}'); $p.Play(); Start-Sleep -Seconds 1; while($p.Position -lt $p.NaturalDuration.TimeSpan){{ Start-Sleep -Milliseconds 100 }}\""
+                subprocess.run(ps_cmd, shell=True, timeout=15, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+        else:
+            cmd = f'uv run edge-tts --voice en-US-AriaNeural --text "{clean}" --write-media "{tmp_path}" && afplay "{tmp_path}" && rm -f "{tmp_path}"'
+            subprocess.run(cmd, shell=True, timeout=10, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         try:
-            subprocess.run(f'say -v Samantha "{clean}"', shell=True, timeout=5)
+            if sys.platform == 'win32':
+                escaped_text = clean.replace("'", "''")
+                ps_speech = f"powershell -NoProfile -Command \"Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{escaped_text}')\""
+                subprocess.run(ps_speech, shell=True, timeout=6, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.run(f'say -v Samantha "{clean}"', shell=True, timeout=5)
         except Exception:
             pass
     finally:
@@ -91,7 +112,10 @@ def send_to_fuli_app(endpoint: str, payload: dict | None = None):
             return res.status == 200
     except Exception:
         try:
-            subprocess.run("open /Applications/Fuli.app", shell=True)
+            if sys.platform == 'win32':
+                subprocess.run('start "" "Fuli.exe"', shell=True)
+            else:
+                subprocess.run("open /Applications/Fuli.app", shell=True)
             return True
         except Exception:
             return False
