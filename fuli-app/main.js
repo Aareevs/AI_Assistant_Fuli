@@ -3,6 +3,17 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 
+// Ensure only a single instance of Fuli runs at any time (prevents duplicate menu bar icons)
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+  process.exit(0);
+}
+
+app.on('second-instance', () => {
+  showWindow();
+});
+
 const envCandidates = [
   path.resolve(__dirname, '../.env'),
   path.resolve(__dirname, '../../../../.env'),
@@ -140,13 +151,32 @@ function createTray() {
   }
 
   tray = new Tray(icon);
-  tray.setToolTip('Fuli — AI Screen & Browser Operator (Click to toggle)');
+  tray.setToolTip('Fuli');
 
-  const shortcutHint = isMac ? 'Option+Space' : 'Alt+Space';
   const contextMenu = Menu.buildFromTemplate([
-    { label: `⚡ Show / Hide Fuli (${shortcutHint})`, click: toggleWindow },
+    { 
+      label: 'Toggle Fuli', 
+      accelerator: isMac ? 'Alt+Space' : 'Alt+Space',
+      click: toggleWindow 
+    },
     { type: 'separator' },
-    { label: 'Quit Fuli', click: () => app.quit() }
+    {
+      label: 'Launch at Login',
+      type: 'checkbox',
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: (item) => {
+        app.setLoginItemSettings({
+          openAtLogin: item.checked,
+          openAsHidden: true
+        });
+      }
+    },
+    { type: 'separator' },
+    { 
+      label: 'Quit Fuli', 
+      accelerator: 'CmdOrCtrl+Q',
+      click: () => app.quit() 
+    }
   ]);
 
   tray.setContextMenu(contextMenu);
