@@ -52,7 +52,10 @@ _cached_audio_playing = False
 
 
 def is_device_audio_playing() -> bool:
-    """Checks whether the system is actively outputting sound (e.g., YouTube video, music, browser media)."""
+    """
+    Checks whether the system is actively outputting sound or video
+    (e.g., YouTube video, music, browser media, movies).
+    """
     global _last_audio_check_time, _cached_audio_playing
     now = time.time()
     if now - _last_audio_check_time < 0.5:
@@ -62,15 +65,37 @@ def is_device_audio_playing() -> bool:
     if sys.platform == 'darwin':
         try:
             out = subprocess.check_output(['pmset', '-g', 'assertions'], stderr=subprocess.DEVNULL, text=True, timeout=0.15)
-            lines = out.splitlines()
-            for i, line in enumerate(lines):
-                if 'coreaudiod' in line:
-                    context = line + ((' ' + lines[i+1]) if i+1 < len(lines) else '')
-                    if 'BuiltInMicrophoneDevice' in context and not ('BuiltInSpeakerDevice' in context or 'audio-out' in context):
-                        continue
-                    if 'BuiltInSpeakerDevice' in context or 'audio-out' in context:
-                        _cached_audio_playing = True
-                        return True
+            
+            # 1. Any video playing (YouTube, Netflix, VLC, movies, etc.) keeps display awake
+            display_sleep_match = re.search(r'PreventUserIdleDisplaySleep\s+(\d+)', out)
+            if display_sleep_match and int(display_sleep_match.group(1)) > 0:
+                _cached_audio_playing = True
+                return True
+
+            # 2. Check active audio output assertions from media/browser apps
+            blocks = out.split('pid 180(coreaudiod):')
+            for b in blocks[1:]:
+                # Must be an audio output assertion
+                if not ('BuiltInSpeakerDevice' in b or 'audio-out' in b or 'Headphone' in b):
+                    continue
+                pid_match = re.search(r'Created for PID:\s*(\d+)', b)
+                if not pid_match:
+                    continue
+                pid = pid_match.group(1)
+                try:
+                    pname = subprocess.check_output(['ps', '-p', pid, '-o', 'comm='], stderr=subprocess.DEVNULL, text=True).strip().lower()
+                except Exception:
+                    continue
+                # Ignore macOS system Siri daemon, microphones, and Fuli itself
+                if 'corespeechd' in pname or 'python' in pname:
+                    continue
+                # Media players, browsers, communications apps
+                media_apps = ('edge', 'chrome', 'safari', 'firefox', 'brave', 'arc', 'opera', 
+                              'spotify', 'music', 'podcasts', 'vlc', 'iina', 'quicktime', 
+                              'zoom', 'teams', 'discord', 'slack', 'youtube')
+                if any(app in pname for app in media_apps):
+                    _cached_audio_playing = True
+                    return True
         except Exception:
             pass
     _cached_audio_playing = False
@@ -85,7 +110,24 @@ def matches_wake_word(transcript: str) -> bool:
     cleaned = re.sub(r'[^\w\s]', '', transcript).strip().lower()
     if not cleaned:
         return False
-    return bool(WAKE_WORD_REGEX.search(cleaned))
+    words = cleaned.split()
+    if not words:
+        return False
+    
+    first_word = words[0]
+    first_two = ' '.join(words[:2]) if len(words) >= 2 else ''
+
+    valid_single = {'fuli', 'foolee'}
+    valid_phrases = {'hey fuli', 'hi fuli', 'hello fuli', 'ok fuli', 'okay fuli'}
+
+    if first_word in valid_single or first_two in valid_phrases:
+        return True
+    
+    # Also support if whisper transcribed a short 1-3 word utterance matching wake word
+    if len(words) <= 3 and any(w in valid_single for w in words):
+        return True
+
+    return False
 
 audio_queue = queue.Queue()
 is_speaking_out_loud = False
