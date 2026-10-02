@@ -7,6 +7,7 @@ const envCandidates = [
   path.resolve(__dirname, '../.env'),
   path.resolve(__dirname, '../../../../.env'),
   path.join(os.homedir(), 'VS-Code/AI_Assistant_Fuli/.env'),
+  path.join(os.homedir(), 'VS-Code/Tier I Projects/AI_Assistant_Fuli/.env'),
   path.join(os.homedir(), '.fuli/.env'),
   path.join(os.homedir(), '.env')
 ];
@@ -263,6 +264,7 @@ function toggleWindow() {
 function startVoiceOperator() {
   const possibleScriptPaths = [
     path.join(os.homedir(), 'VS-Code', 'AI_Assistant_Fuli', 'fuli', 'voice_operator.py'),
+    path.join(os.homedir(), 'VS-Code', 'Tier I Projects', 'AI_Assistant_Fuli', 'fuli', 'voice_operator.py'),
     path.resolve(__dirname, '..', 'fuli', 'voice_operator.py'),
     path.resolve(__dirname, '..', '..', 'fuli', 'voice_operator.py')
   ];
@@ -316,12 +318,15 @@ function startVoiceOperator() {
   } catch (e) {}
 
   const { spawn } = require('child_process');
-  const spawnEnv = { ...process.env };
+  const spawnEnv = { 
+    ...process.env,
+    PYTHONUNBUFFERED: '1'
+  };
   if (isMac) {
     spawnEnv.PATH = `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || ''}`;
   }
 
-  voiceProcess = spawn(uvPath, ['run', 'python', '-m', 'fuli.voice_operator'], {
+  voiceProcess = spawn(uvPath, ['run', 'python', '-u', '-m', 'fuli.voice_operator'], {
     cwd: projectDir,
     env: spawnEnv,
     windowsHide: true,

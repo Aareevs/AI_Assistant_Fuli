@@ -31,16 +31,56 @@ load_dotenv()
 USER_NAME = os.getenv("USER_NAME", "Aareev")
 SAMPLE_RATE = 16000
 BLOCK_SIZE = 1024
-SILENCE_THRESHOLD = 0.0035  # Microphone sensitivity threshold
-SILENCE_DURATION = 0.55     # 550ms natural conversational pause for command completion
+BASE_SILENCE_THRESHOLD = 0.0035  # Quiet room microphone sensitivity threshold
+SILENCE_DURATION = 0.55          # 550ms natural conversational pause for command completion
 
-# Expanded phonetic variations of "Fuli" recognized by Whisper
-WAKE_WORDS = [
-    "fuli", "fully", "hey fuli", "hey fully", 
-    "fooly", "foolee", "fulee", "phooli", 
-    "foley", "fuji", "furi", "flee", "philip", 
-    "philly", "poly", "pulley", "foolish", "fury"
-]
+# Real phonetic variations of the name Fuli
+PRIMARY_NAMES = r'(?:fuli|fooly|foolee|fulee|phooli)'
+GREETINGS = r'(?:hey|hi|yo|ok|okay)'
+
+# Strict wake-word pattern:
+# - Requires utterance to START with "Fuli" / "Hey Fuli" / "Hi Fuli" / "Yo Fuli" / "OK Fuli" / "Hey Fully"
+# - Strictly rejects continuous sentences from YouTube/podcasts (e.g. "...is fully functional...")
+WAKE_WORD_REGEX = re.compile(
+    rf'^\s*(?:{GREETINGS}\s+)?{PRIMARY_NAMES}\b|^\s*{GREETINGS}\s+fully\b',
+    re.IGNORECASE
+)
+
+# Audio check cache
+_last_audio_check_time = 0.0
+_cached_audio_playing = False
+
+
+def is_device_audio_playing() -> bool:
+    """Checks whether the system is actively outputting sound (e.g., YouTube video, music, browser media)."""
+    global _last_audio_check_time, _cached_audio_playing
+    now = time.time()
+    if now - _last_audio_check_time < 0.8:
+        return _cached_audio_playing
+    _last_audio_check_time = now
+
+    if sys.platform == 'darwin':
+        try:
+            out = subprocess.check_output(['pmset', '-g', 'assertions'], stderr=subprocess.DEVNULL, text=True, timeout=0.1)
+            for line in out.splitlines():
+                if 'coreaudiod' in line and ('preventuseridlesleep' in line.lower() or 'audio-out' in line.lower() or 'builtinspeaker' in line.lower()):
+                    _cached_audio_playing = True
+                    return True
+        except Exception:
+            pass
+    _cached_audio_playing = False
+    return False
+
+
+def matches_wake_word(transcript: str) -> bool:
+    """
+    Validates wake word with strict position and context checking.
+    Rejects continuous speech from YouTube/movies where words appear in the middle of sentences.
+    """
+    cleaned = re.sub(r'[^\w\s]', '', transcript).strip().lower()
+    if not cleaned:
+        return False
+    return bool(WAKE_WORD_REGEX.search(cleaned))
 
 audio_queue = queue.Queue()
 is_speaking_out_loud = False
@@ -137,9 +177,8 @@ def clean_voice_prompt(text: str) -> str:
     cleaned = re.sub(r"hey\s+aareev[.!?,]*", " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"i've\s*taken\s*you\s*to.*?[.!?,]", " ", cleaned, flags=re.IGNORECASE)
     
-    # Remove all wake-word variations
-    for w in WAKE_WORDS:
-        cleaned = re.sub(rf'\b{w}\b[,\s!]*', ' ', cleaned, flags=re.IGNORECASE)
+    # Strip wake word at start
+    cleaned = re.sub(rf'^\s*(?:{GREETINGS}\s+)?(?:{PRIMARY_NAMES}|fully)\b[,\s!]*', '', cleaned, flags=re.IGNORECASE)
     
     # Remove conversational filler prefix
     cleaned = re.sub(r'^(hey|yo|hi|hello|ok|okay)[,\s!]+', '', cleaned.strip(), flags=re.IGNORECASE)
@@ -153,7 +192,7 @@ def clean_voice_prompt(text: str) -> str:
 def is_standalone_wake_word(text: str) -> bool:
     """Checks if the utterance is just the wake word without a real multi-word command."""
     cleaned = clean_voice_prompt(text)
-    if not cleaned or len(cleaned) < 3:
+    if not cleaned or len(cleaned) < 2:
         return True
     words = [w for w in re.findall(r'\b\w+\b', cleaned.lower()) if w not in ['a', 'an', 'the', 'it', 'yes', 'yeah', 'now', 'go', 'ahead', 'hey', 'hi', 'ok', 'okay']]
     return len(words) == 0
@@ -196,12 +235,15 @@ def start_control_server():
         print(f"Control server notice: {e}")
 
 
-def capture_next_utterance(model, max_wait=7.0):
-    """Records the next speech utterance from the microphone and returns the transcript."""
+def capture_next_utterance(model, max_wait=7.0, ambient_floor=0.0035):
+    """Records the next speech utterance from the microphone with dynamic noise rejection."""
     cmd_audio = []
     cmd_speaking = False
     cmd_silence = None
     timeout_start = time.time()
+
+    # Dynamic speech threshold based on current ambient noise
+    speech_threshold = max(BASE_SILENCE_THRESHOLD, ambient_floor * 1.35)
 
     while time.time() - timeout_start < max_wait:
         try:
@@ -209,7 +251,7 @@ def capture_next_utterance(model, max_wait=7.0):
         except queue.Empty:
             continue
         c_energy = np.linalg.norm(c_chunk) / np.sqrt(len(c_chunk))
-        if c_energy > SILENCE_THRESHOLD:
+        if c_energy > speech_threshold:
             cmd_speaking = True
             cmd_silence = None
             cmd_audio.append(c_chunk)
@@ -219,10 +261,19 @@ def capture_next_utterance(model, max_wait=7.0):
                 cmd_silence = time.time()
             elif time.time() - cmd_silence > SILENCE_DURATION:
                 break
+        elif time.time() - timeout_start > 3.0 and not cmd_speaking:
+            # If user didn't speak within 3s, don't record background YouTube audio
+            break
 
-    if cmd_audio:
+    if cmd_audio and cmd_speaking:
         full_cmd = np.concatenate(cmd_audio, axis=0).flatten().astype(np.float32)
-        c_segments, _ = model.transcribe(full_cmd, language="en", beam_size=1, condition_on_previous_text=False)
+        c_segments, _ = model.transcribe(
+            full_cmd, 
+            language="en", 
+            beam_size=1, 
+            condition_on_previous_text=False,
+            initial_prompt="Fuli. Command: "
+        )
         return " ".join(s.text for s in c_segments).strip()
     return ""
 
@@ -231,6 +282,7 @@ def run_voice_operator():
     print("\n⚡ Initializing Fuli Free & Local Voice Engine...")
     print("✓ STT: Local faster-whisper (tiny.en, Apple Silicon 4-threads — $0 cost)")
     print("✓ Real-Time Streaming: ~250ms sliding-window wake-word detection")
+    print("✓ Echo Suppression: Dynamic noise-floor tracking & device audio detection")
     print("✓ Feedback: Instant 50ms System Chime (Zero speech drop)")
     print(f"✓ Persona: Addressing {USER_NAME}")
     print("✓ Wake words: 'Fuli' or 'Hey Fuli'")
@@ -253,6 +305,7 @@ def run_voice_operator():
         # Rolling ring buffer of the last ~1.15 seconds of audio (18 chunks of 1024 samples)
         ring_buffer = collections.deque(maxlen=18)
         check_counter = 0
+        ambient_noise_floor = BASE_SILENCE_THRESHOLD
 
         while True:
             # Handle UI microphone button click
@@ -261,7 +314,7 @@ def run_voice_operator():
                 play_chime()
                 print("\n🎙️ [UI Mic Clicked] Listening for command...")
                 send_to_fuli_app("/status", {"status": "🎙️ Listening... Speak your command to Fuli"})
-                raw = capture_next_utterance(model, max_wait=8.0)
+                raw = capture_next_utterance(model, max_wait=8.0, ambient_floor=ambient_noise_floor)
                 command = clean_voice_prompt(raw)
                 if command and len(command) > 2:
                     print(f"🚀 Executing spoken command: \"{command}\"")
@@ -278,17 +331,40 @@ def run_voice_operator():
             ring_buffer.append(chunk)
             energy = np.linalg.norm(chunk) / np.sqrt(len(chunk))
 
-            # Only evaluate when there is active speech energy
-            if energy > SILENCE_THRESHOLD and len(ring_buffer) >= 8:
+            # Smoothly adapt ambient noise floor
+            ambient_noise_floor = 0.96 * ambient_noise_floor + 0.04 * energy
+
+            # Detect if YouTube / media is actively playing on device
+            audio_playing = is_device_audio_playing()
+            effective_threshold = (
+                max(BASE_SILENCE_THRESHOLD * 2.2, ambient_noise_floor * 1.5)
+                if audio_playing
+                else max(BASE_SILENCE_THRESHOLD, ambient_noise_floor * 1.25)
+            )
+
+            # Only evaluate when energy is above the adaptive threshold
+            if energy > effective_threshold and len(ring_buffer) >= 8:
                 check_counter += 1
 
                 # Check sliding window every 3 chunks (~190ms)
                 if check_counter % 3 == 0:
                     audio_data = np.concatenate(list(ring_buffer), axis=0).flatten().astype(np.float32)
-                    segments, _ = model.transcribe(audio_data, language="en", beam_size=1, condition_on_previous_text=False)
-                    short_transcript = " ".join(s.text for s in segments).strip().lower()
+                    segments, _ = model.transcribe(
+                        audio_data, 
+                        language="en", 
+                        beam_size=1, 
+                        condition_on_previous_text=False,
+                        initial_prompt="Fuli. Hey Fuli."
+                    )
+                    
+                    segments_list = list(segments)
+                    # Filter out non-speech noise or low-confidence hallucination
+                    if any(s.no_speech_prob > 0.50 for s in segments_list):
+                        continue
 
-                    if any(re.search(rf'\b{w}\b', short_transcript) for w in WAKE_WORDS):
+                    short_transcript = " ".join(s.text for s in segments_list).strip().lower()
+
+                    if matches_wake_word(short_transcript):
                         # WAKE WORD DETECTED IN REAL TIME (~250ms)!
                         print(f"\n✨ Wake word DETECTED in real-time ({short_transcript})! Opening Fuli...")
                         # 1. Open Fuli window immediately on screen
@@ -301,8 +377,8 @@ def run_voice_operator():
                         ring_buffer.clear()
                         check_counter = 0
 
-                        # Capture the user's command immediately without missing a single syllable
-                        cmd_raw = capture_next_utterance(model, max_wait=7.0)
+                        # Capture the user's command immediately with dynamic noise rejection
+                        cmd_raw = capture_next_utterance(model, max_wait=7.0, ambient_floor=ambient_noise_floor)
                         cleaned_cmd = clean_voice_prompt(cmd_raw)
 
                         if cleaned_cmd and len(cleaned_cmd) > 2 and not is_standalone_wake_word(cleaned_cmd):
