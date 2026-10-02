@@ -55,17 +55,22 @@ def is_device_audio_playing() -> bool:
     """Checks whether the system is actively outputting sound (e.g., YouTube video, music, browser media)."""
     global _last_audio_check_time, _cached_audio_playing
     now = time.time()
-    if now - _last_audio_check_time < 0.8:
+    if now - _last_audio_check_time < 0.5:
         return _cached_audio_playing
     _last_audio_check_time = now
 
     if sys.platform == 'darwin':
         try:
-            out = subprocess.check_output(['pmset', '-g', 'assertions'], stderr=subprocess.DEVNULL, text=True, timeout=0.1)
-            for line in out.splitlines():
-                if 'coreaudiod' in line and ('preventuseridlesleep' in line.lower() or 'audio-out' in line.lower() or 'builtinspeaker' in line.lower()):
-                    _cached_audio_playing = True
-                    return True
+            out = subprocess.check_output(['pmset', '-g', 'assertions'], stderr=subprocess.DEVNULL, text=True, timeout=0.15)
+            lines = out.splitlines()
+            for i, line in enumerate(lines):
+                if 'coreaudiod' in line:
+                    context = line + ((' ' + lines[i+1]) if i+1 < len(lines) else '')
+                    if 'BuiltInMicrophoneDevice' in context and not ('BuiltInSpeakerDevice' in context or 'audio-out' in context):
+                        continue
+                    if 'BuiltInSpeakerDevice' in context or 'audio-out' in context:
+                        _cached_audio_playing = True
+                        return True
         except Exception:
             pass
     _cached_audio_playing = False
@@ -243,7 +248,7 @@ def capture_next_utterance(model, max_wait=7.0, ambient_floor=0.0035):
     timeout_start = time.time()
 
     # Dynamic speech threshold based on current ambient noise
-    speech_threshold = max(BASE_SILENCE_THRESHOLD, ambient_floor * 1.35)
+    speech_threshold = max(0.015, ambient_floor * 1.4)
 
     while time.time() - timeout_start < max_wait:
         try:
@@ -261,8 +266,8 @@ def capture_next_utterance(model, max_wait=7.0, ambient_floor=0.0035):
                 cmd_silence = time.time()
             elif time.time() - cmd_silence > SILENCE_DURATION:
                 break
-        elif time.time() - timeout_start > 3.0 and not cmd_speaking:
-            # If user didn't speak within 3s, don't record background YouTube audio
+        elif time.time() - timeout_start > 2.5 and not cmd_speaking:
+            # If user didn't speak within 2.5s, don't keep recording background video
             break
 
     if cmd_audio and cmd_speaking:
@@ -271,8 +276,7 @@ def capture_next_utterance(model, max_wait=7.0, ambient_floor=0.0035):
             full_cmd, 
             language="en", 
             beam_size=1, 
-            condition_on_previous_text=False,
-            initial_prompt="Fuli. Command: "
+            condition_on_previous_text=False
         )
         return " ".join(s.text for s in c_segments).strip()
     return ""
@@ -334,13 +338,12 @@ def run_voice_operator():
             # Smoothly adapt ambient noise floor
             ambient_noise_floor = 0.96 * ambient_noise_floor + 0.04 * energy
 
-            # Detect if YouTube / media is actively playing on device
-            audio_playing = is_device_audio_playing()
-            effective_threshold = (
-                max(BASE_SILENCE_THRESHOLD * 2.2, ambient_noise_floor * 1.5)
-                if audio_playing
-                else max(BASE_SILENCE_THRESHOLD, ambient_noise_floor * 1.25)
-            )
+            # If YouTube, music, or video sound is actively outputting from Mac speakers,
+            # completely suppress passive wake-word detection so Fuli never responds to noises from the Mac.
+            if is_device_audio_playing():
+                continue
+
+            effective_threshold = max(BASE_SILENCE_THRESHOLD, ambient_noise_floor * 1.35)
 
             # Only evaluate when energy is above the adaptive threshold
             if energy > effective_threshold and len(ring_buffer) >= 8:
@@ -353,13 +356,12 @@ def run_voice_operator():
                         audio_data, 
                         language="en", 
                         beam_size=1, 
-                        condition_on_previous_text=False,
-                        initial_prompt="Fuli. Hey Fuli."
+                        condition_on_previous_text=False
                     )
                     
                     segments_list = list(segments)
                     # Filter out non-speech noise or low-confidence hallucination
-                    if any(s.no_speech_prob > 0.50 for s in segments_list):
+                    if not segments_list or any(s.no_speech_prob > 0.45 for s in segments_list):
                         continue
 
                     short_transcript = " ".join(s.text for s in segments_list).strip().lower()
