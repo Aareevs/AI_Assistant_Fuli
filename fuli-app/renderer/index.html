@@ -37,6 +37,11 @@
           <span>Stop</span>
           <kbd>Esc</kbd>
         </button>
+        <button id="connectorsBtn" class="mic-btn" title="Connectors">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 2v6"></path><path d="M15 2v6"></path><path d="M6 8h12v4a6 6 0 0 1-12 0V8z"></path><path d="M12 18v4"></path>
+          </svg>
+        </button>
         <button id="micBtn" class="mic-btn" title="Voice Input (Say 'Fuli' or Click)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
@@ -53,6 +58,9 @@
         </button>
       </div>
     </div>
+
+    <!-- Connectors popover -->
+    <div class="connectors-panel hidden" id="connectorsPanel"></div>
 
     <!-- Live Execution Status Card (Collapsible) -->
     <div class="action-card hidden" id="actionCard">

@@ -51,5 +51,6 @@ contextBridge.exposeInMainWorld('fuliAPI', {
 
   triggerMicListen: () => ipcRenderer.send('fuli:trigger-mic-listen'),
 
+  spotify: (cmd, arg) => ipcRenderer.invoke('fuli:spotify', cmd, arg),
   copyText: (text) => ipcRenderer.invoke('fuli:copy-text', text)
 });

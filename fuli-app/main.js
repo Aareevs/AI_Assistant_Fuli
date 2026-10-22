@@ -31,6 +31,7 @@ for (const envPath of envCandidates) {
 }
 
 const { actionExecutor } = require('./automation/executor');
+const spotify = require('./automation/spotify');
 const extras = require('./automation/extras');
 const http = require('http');
 
@@ -515,6 +516,24 @@ ipcMain.on('fuli:trigger-mic-listen', () => {
   try {
     http.get('http://127.0.0.1:8766/listen', () => {}).on('error', () => {});
   } catch (e) {}
+});
+
+// Fuli player controls (Spotify desktop app underneath)
+ipcMain.handle('fuli:spotify', async (event, cmd, arg) => {
+  try {
+    if (cmd === 'state') return { ok: true, data: await spotify.state() };
+    if (cmd === 'status') return { ok: true, data: spotify.status() };
+    if (cmd === 'connect') {
+      // Step out of the way (Fuli floats above everything) while the Spotify login page is in the browser
+      isTaskRunning = true;
+      hideWindow();
+      return { ok: true, data: spotify.status() };
+    }
+    await spotify.control(cmd, arg);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 ipcMain.handle('fuli:copy-text', (event, text) => {

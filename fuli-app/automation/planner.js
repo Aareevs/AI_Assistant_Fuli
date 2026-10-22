@@ -1,4 +1,5 @@
 const path = require('path');
+const spotify = require('./spotify');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
 const GEMINI_API_KEY = process.env.GOOGLE_API_KEY;
@@ -75,6 +76,16 @@ Supported ACTION_TYPEs:
     Parameters: { "text": "Spoken text" }
     Use to speak a response aloud to the user in Fuli's natural female voice.
 
+14. "spotify_play"
+    Parameters: { "kind": "track" | "playlist" | "album", "query": "song/playlist/album name", "artist": "optional artist" }
+    Use whenever the user wants a specific song, playlist or album played. Fuli shows its own player with Spotify's cover art and track list.
+
+14b. "spotify_connect" {} signs the user in to Spotify via browser; "spotify_disconnect" {}.
+
+15. "spotify_now_playing"
+    Parameters: {}
+    Show Fuli's player for whatever is currently playing.
+
 16. "calc"
     Parameters: { "expression": "2*(3+4)" | "15% of 80" | "10 km to miles" }
 
@@ -111,6 +122,8 @@ const CANDIDATE_MODELS = [
 ];
 
 
+const unquote = (x) => (x || '').replace(/^[\s"'“‘]+|[\s"'”’.]+$/g, '');
+
 const plan = (summary, ...steps) => ({ summary, steps: steps.map((st, i) => ({ id: i + 1, ...st })) });
 
 const WINDOW_WORDS = [
@@ -130,7 +143,45 @@ function windowLayout(where) {
 
 // Feature commands (Spotify, calculator, windows, system, clipboard, snippets) — typed or spoken.
 function tryFeaturePath(p, original) {
+  if (/^(?:open|launch|play)\s+spotify$/.test(p)) return null; // plain app launch / resume, handled below
   // ── Spotify ──
+  if (spotify.isInstalled()) {
+    if (/^(?:connect|link|log ?in|sign ?in|log in to|sign in to|connect to)\s+(?:to\s+|with\s+|my\s+)?spotify(?:\s+account)?$/.test(p) || /^spotify (?:login|log in|sign in|connect)$/.test(p)) {
+      return plan('Connect Spotify', { description: 'Sign in to Spotify in your browser', action: 'spotify_connect' });
+    }
+    if (/^(?:disconnect|log ?out of|sign out of|unlink)\s+(?:from\s+)?spotify$/.test(p)) {
+      return plan('Disconnect Spotify', { description: 'Disconnect Spotify', action: 'spotify_disconnect' });
+    }
+    if (/^(?:show\s+(?:me\s+)?)?(?:now playing|what'?s playing|what song is (?:this|playing)|(?:show|open) (?:the )?(?:music )?player)$/.test(p)) {
+      return plan('Show what is playing', { description: 'Open Fuli player', action: 'spotify_now_playing' });
+    }
+    // "... on spotify" / "... spotify" at the end is just noise — drop it so the real request matches
+    const bare = p.replace(/\s+(?:on|in|from|with|using|via)?\s*spotify$/, '');
+    if (bare && bare !== p) p = bare;
+    // "open/show" only displays the playlist or album; "play/start/shuffle" also starts it
+    const isOpenVerb = (v) => /^(?:open|show|view|browse)$/.test(v);
+    const pl = p.match(/^(open|show|view|browse|play|start|put on|shuffle|listen to)\s+(?:me\s+)?(?:the\s+|my\s+)?(?:playlist\s+(.+?)|(.+?)\s+playlist)(?:\s+on spotify)?$/);
+    if (pl) {
+      const query = unquote(pl[2] || pl[3]);
+      const autoplay = !isOpenVerb(pl[1]);
+      return plan(`${autoplay ? 'Play' : 'Open'} the ${query} playlist`, { description: `${autoplay ? 'Find and play' : 'Open'} "${query}" playlist`, action: 'spotify_play', kind: 'playlist', query, autoplay });
+    }
+    const al = p.match(/^(play|open|show|view|put on|listen to)\s+(?:the\s+)?album\s+(.+?)(?:\s+by\s+(.+?))?(?:\s+on spotify)?$/);
+    if (al) {
+      const autoplay = !isOpenVerb(al[1]);
+      return plan(`${autoplay ? 'Play' : 'Open'} the album ${al[2]}`, { description: `${autoplay ? 'Find and play' : 'Open'} album "${al[2]}"`, action: 'spotify_play', kind: 'album', query: unquote(al[2]), artist: al[3] && unquote(al[3]), autoplay });
+    }
+    const tr = p.match(/^(?:play|put on|listen to)\s+(?:the\s+)?(?:song\s+|track\s+)?(.+?)(?:\s+by\s+(.+?))?(?:\s+on spotify)?$/);
+    if (tr && !/^(?:music|some music|something|it|again|next|previous|the next (?:song|track)|songs?)$/.test(tr[1])) {
+      const query = unquote(tr[1]);
+      const artist = tr[2] && unquote(tr[2]);
+      return plan(`Play ${query}${artist ? ` by ${artist}` : ''}`, { description: `Find and play "${query}"${artist ? ` by ${artist}` : ''}`, action: 'spotify_play', kind: 'track', query, artist });
+    }
+    if (/^(?:previous|last|go back(?: a)?)(?:\s+song|\s+track)?$/.test(p)) {
+      return plan('Previous track', { description: 'Previous track', action: 'system_media', command: 'previous' });
+    }
+  }
+
   // ── Calculator & conversions ──
   const calcMatch = p.match(/^(?:calculate|calc|compute|convert|what(?:'s| is)|whats|how much is)\s+(.+?)\??$/) || (/^[\d\s.,+\-*/^%()x×÷]+$/.test(p) && /\d\s*[-+*/^%x×÷]\s*\d/.test(p) ? [p, p] : null);
   if (calcMatch && /\d/.test(calcMatch[1])) {

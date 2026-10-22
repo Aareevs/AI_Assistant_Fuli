@@ -1,6 +1,7 @@
 const { planActions } = require('./planner');
 const { browserController } = require('./browser');
 const { systemController } = require('./system');
+const spotify = require('./spotify');
 const extras = require('./extras');
 
 // Electron-only helpers, loaded lazily so the executor still runs under plain Node tests
@@ -104,6 +105,42 @@ class ActionExecutor {
           case 'system_media':
             await systemController.mediaControl(step.command || step.mediaAction);
             break;
+
+          case 'spotify_play': {
+            onProgress({ type: 'status', message: 'Finding it on Spotify…' });
+            const found = await spotify.resolve(step);
+            const first = found.tracks[found.startIndex];
+            if (step.autoplay !== false) {
+              await spotify.playUri(first && first.uri, found.contextUri);
+              say(`Playing ${first && found.kind === 'track' ? `${first.name} by ${first.artist}` : found.title}.`);
+            }
+            onProgress({ type: 'card', card: { ...found, kind: 'player', mediaKind: found.kind, idle: step.autoplay === false } });
+            break;
+          }
+
+          case 'spotify_connect': {
+            onProgress({ type: 'status', message: 'Approve Fuli in the Spotify page that just opened…' });
+            const wins = electron().BrowserWindow.getAllWindows();
+            wins.forEach((w) => w.hide()); // Fuli floats above everything, so move aside for the login page
+            let name;
+            try { ({ name } = await spotify.connect()); } finally { wins.forEach((w) => { w.show(); w.focus(); }); }
+            onProgress({ type: 'card', card: { kind: 'result', title: `Connected as ${name}`, subtitle: 'Fuli can now find your playlists and show their songs' } });
+            say('Spotify is connected.');
+            break;
+          }
+
+          case 'spotify_disconnect':
+            spotify.disconnect();
+            onProgress({ type: 'card', card: { kind: 'result', title: 'Spotify disconnected', subtitle: 'Fuli forgot your login' } });
+            break;
+
+          case 'spotify_now_playing': {
+            const st = await spotify.state();
+            if (!st.running || !st.uri) throw new Error('Nothing is playing on Spotify right now');
+            const found = await spotify.trackById(st.uri.split(':').pop());
+            onProgress({ type: 'card', card: { ...found, kind: 'player', mediaKind: found.kind } });
+            break;
+          }
 
           case 'calc': {
             const { result, expression } = extras.calculate(step.expression);
