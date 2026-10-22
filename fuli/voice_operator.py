@@ -20,6 +20,7 @@ import threading
 import subprocess
 import urllib.request
 import json
+import difflib
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import numpy as np
 import sounddevice as sd
@@ -102,32 +103,30 @@ def is_device_audio_playing() -> bool:
     return False
 
 
+def _sounds_like_fuli(word: str) -> bool:
+    """Whisper often writes 'Fuli' as fully / foolie / Julie / folly — accept close spellings."""
+    w = re.sub(r'[^a-z]', '', word.lower())
+    if not w:
+        return False
+    if w in {'fuli', 'fooly', 'fooli', 'foolee', 'fulee', 'fuly', 'phooli', 'fully', 'foolie', 'fuhli', 'fooley', 'foley', 'folly', 'julie', 'fulie', 'fuley', 'fuuli', 'fooly'}:
+        return True
+    return len(w) >= 4 and difflib.SequenceMatcher(None, w, 'fuli').ratio() >= 0.74
+
+
 def matches_wake_word(transcript: str) -> bool:
     """
-    Validates wake word with strict position and context checking.
-    Rejects continuous speech from YouTube/movies where words appear in the middle of sentences.
+    Wake word must be the START of a short utterance ("Fuli", "Hey Fuli", "OK Fuli").
+    Long sentences (YouTube, podcasts) are rejected because they are not short wake phrases.
     """
     cleaned = re.sub(r'[^\w\s]', '', transcript).strip().lower()
-    if not cleaned:
-        return False
     words = cleaned.split()
-    if not words:
+    if not words or len(words) > 4:
         return False
-    
-    first_word = words[0]
-    first_two = ' '.join(words[:2]) if len(words) >= 2 else ''
-
-    valid_single = {'fuli', 'foolee'}
-    valid_phrases = {'hey fuli', 'hi fuli', 'hello fuli', 'ok fuli', 'okay fuli'}
-
-    if first_word in valid_single or first_two in valid_phrases:
+    greetings = {'hey', 'hi', 'hello', 'ok', 'okay', 'yo', 'a', 'hay'}
+    if _sounds_like_fuli(words[0]):
         return True
-    
-    # Also support if whisper transcribed a short 1-3 word utterance matching wake word
-    if len(words) <= 3 and any(w in valid_single for w in words):
-        return True
+    return len(words) >= 2 and words[0] in greetings and _sounds_like_fuli(words[1])
 
-    return False
 
 audio_queue = queue.Queue()
 is_speaking_out_loud = False
@@ -403,33 +402,31 @@ def run_voice_operator():
                     
                     segments_list = list(segments)
                     # Filter out non-speech noise or low-confidence hallucination
-                    if not segments_list or any(s.no_speech_prob > 0.45 for s in segments_list):
+                    if not segments_list:
+                        continue
+                    if any(s.no_speech_prob > 0.45 for s in segments_list):
+                        print(f"[skipped: no_speech_prob {max(s.no_speech_prob for s in segments_list):.2f}] {' '.join(s.text for s in segments_list).strip()!r}", flush=True)
                         continue
 
                     short_transcript = " ".join(s.text for s in segments_list).strip().lower()
+                    print(f"[heard] {short_transcript!r}  energy={energy:.4f} floor={effective_threshold:.4f}", flush=True)
 
                     if matches_wake_word(short_transcript):
                         # WAKE WORD DETECTED IN REAL TIME (~250ms)!
                         print(f"\n✨ Wake word DETECTED in real-time ({short_transcript})! Opening Fuli...")
-                        # 1. Open Fuli window immediately on screen
+                        # Saying "Fuli" only opens the window — nothing is listened for or executed afterwards.
                         send_to_fuli_app("/show")
-                        # 2. Instant 50ms chime
                         play_chime()
-                        send_to_fuli_app("/status", {"status": "🎙️ Listening for your command..."})
 
-                        # Clear ring buffer to prevent duplicate triggers
+                        # Clear ring buffer + short cooldown so the same utterance can't re-trigger
                         ring_buffer.clear()
                         check_counter = 0
-
-                        # Capture the user's command immediately with dynamic noise rejection
-                        cmd_raw = capture_next_utterance(model, max_wait=7.0, ambient_floor=ambient_noise_floor)
-                        cleaned_cmd = clean_voice_prompt(cmd_raw)
-
-                        if cleaned_cmd and len(cleaned_cmd) > 2 and not is_standalone_wake_word(cleaned_cmd):
-                            print(f"🚀 Executing spoken command: \"{cleaned_cmd}\"")
-                            send_to_fuli_app("/command", {"prompt": cleaned_cmd})
-                        else:
-                            send_to_fuli_app("/status", {"status": "Fuli is ready"})
+                        while not audio_queue.empty():
+                            try:
+                                audio_queue.get_nowait()
+                            except queue.Empty:
+                                break
+                        time.sleep(1.2)
 
                         print("\n🎙️ Listening for 'Fuli'...")
 
