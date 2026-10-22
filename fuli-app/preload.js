@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('fuliAPI', {
-  submitPrompt: (prompt) => ipcRenderer.send('fuli:submit-prompt', prompt),
+  submitPrompt: (prompt, spoken = false) => ipcRenderer.send('fuli:submit-prompt', prompt, !!spoken),
   cancelTask: () => ipcRenderer.send('fuli:cancel-task'),
   hideWindow: () => ipcRenderer.send('fuli:hide-window'),
   closeApp: () => ipcRenderer.send('fuli:close-app'),
@@ -49,5 +49,10 @@ contextBridge.exposeInMainWorld('fuliAPI', {
     return () => ipcRenderer.removeListener('fuli:set-status', handler);
   },
 
-  triggerMicListen: () => ipcRenderer.send('fuli:trigger-mic-listen')
+  triggerMicListen: () => ipcRenderer.send('fuli:trigger-mic-listen'),
+
+  spotify: (cmd, arg) => ipcRenderer.invoke('fuli:spotify', cmd, arg),
+  copyText: (text) => ipcRenderer.invoke('fuli:copy-text', text),
+  google: (cmd, arg) => ipcRenderer.invoke('fuli:google', cmd, arg),
+  openUrl: (url) => ipcRenderer.invoke('fuli:open-url', url)
 });

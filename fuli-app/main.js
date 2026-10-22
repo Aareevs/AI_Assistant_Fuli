@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage, systemPreferences } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage, systemPreferences, clipboard } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -31,6 +31,10 @@ for (const envPath of envCandidates) {
 }
 
 const { actionExecutor } = require('./automation/executor');
+const spotify = require('./automation/spotify');
+const extras = require('./automation/extras');
+const player = require('./automation/player');
+const google = require('./automation/google');
 const http = require('http');
 
 const isWin = process.platform === 'win32';
@@ -204,6 +208,8 @@ function createWindow() {
     hiddenInMissionControl: isMac,
     hasShadow: true,
     show: false,
+    vibrancy: isMac ? 'under-window' : undefined,
+    visualEffectState: 'active',
     type: isMac ? 'panel' : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -251,8 +257,13 @@ function createWindow() {
   });
 }
 
-function showWindow() {
+async function showWindow() {
   if (!mainWindow) return;
+
+  // Remember the app in front so window snapping / snippet pasting act on it, not on Fuli
+  if (!mainWindow.isVisible()) {
+    await Promise.race([extras.captureFrontmost(), new Promise((r) => setTimeout(r, 250))]);
+  }
 
   allowBlurHide = false;
   focusTimestamp = Date.now();
@@ -380,7 +391,15 @@ function startVoiceOperator() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Widevine (castlabs Electron build) — needed for Spotify's in-app player; absent on stock Electron
+  try {
+    const { components } = require('electron');
+    if (components && components.whenReady) await components.whenReady();
+  } catch (e) {
+    logFuli(`Widevine component notice: ${e && e.message ? e.message : e}`);
+  }
+
   if (process.platform === 'darwin' && app.dock) {
     try {
       app.dock.hide();
@@ -400,6 +419,15 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   startLocalCommandServer();
+
+  // In-app Spotify playback (only starts when Spotify is connected with streaming permission)
+  spotify.setEngine(player);
+  player.start();
+
+  // Clipboard history: sample the clipboard and keep recent text entries
+  setInterval(() => {
+    try { extras.recordClipboard(clipboard.readText()); } catch (e) {}
+  }, 1000);
 
   // Request macOS microphone permission so Fuli can hear voice commands
   if (process.platform === 'darwin' && systemPreferences && systemPreferences.askForMediaAccess) {
@@ -456,7 +484,7 @@ app.on('will-quit', () => {
 });
 
 // IPC Handlers
-ipcMain.on('fuli:submit-prompt', async (event, prompt) => {
+ipcMain.on('fuli:submit-prompt', async (event, prompt, spoken) => {
   if (!prompt || !prompt.trim()) return;
 
   isTaskRunning = true;
@@ -465,7 +493,7 @@ ipcMain.on('fuli:submit-prompt', async (event, prompt) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('fuli:progress', progress);
       }
-    });
+    }, { spoken: !!spoken });
 
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('fuli:complete', result);
@@ -502,4 +530,54 @@ ipcMain.on('fuli:trigger-mic-listen', () => {
   try {
     http.get('http://127.0.0.1:8766/listen', () => {}).on('error', () => {});
   } catch (e) {}
+});
+
+// Fuli player controls (Spotify desktop app underneath)
+ipcMain.handle('fuli:spotify', async (event, cmd, arg) => {
+  try {
+    if (cmd === 'state') return { ok: true, data: await spotify.state() };
+    if (cmd === 'status') return { ok: true, data: spotify.status() };
+    if (cmd === 'playlist') return { ok: true, data: await spotify.openPlaylist(arg) };
+    if (cmd === 'disconnect') { spotify.disconnect(); player.stop(); return { ok: true, data: spotify.status() }; }
+    if (cmd === 'connect') {
+      // Step out of the way (Fuli floats above everything) while the Spotify login page is in the browser
+      isTaskRunning = true;
+      hideWindow();
+      try { await spotify.connect(); player.stop(); player.start(); } finally { isTaskRunning = false; showWindow(); }
+      return { ok: true, data: spotify.status() };
+    }
+    await spotify.control(cmd, arg);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('fuli:copy-text', (event, text) => {
+  clipboard.writeText(String(text || ''));
+  return { ok: true };
+});
+
+// Google connector (Calendar, Gmail, YouTube)
+ipcMain.handle('fuli:google', async (event, cmd, arg) => {
+  try {
+    if (cmd === 'status') return { ok: true, data: google.status() };
+    if (cmd === 'disconnect') { await google.disconnect(); return { ok: true, data: google.status() }; }
+    if (cmd === 'delete-event') { await google.deleteEvent(arg); return { ok: true }; }
+    if (cmd === 'connect') {
+      // Step out of the way (Fuli floats above everything) while the Google login page is in the browser
+      isTaskRunning = true;
+      hideWindow();
+      try { await google.connect(); } finally { isTaskRunning = false; showWindow(); }
+      return { ok: true, data: google.status() };
+    }
+    return { ok: false, error: `Unknown command: ${cmd}` };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('fuli:open-url', (event, url) => {
+  if (/^https:\/\/(?:[\w-]+\.)?(?:google|youtube)\.com\//.test(String(url))) require('electron').shell.openExternal(url);
+  return { ok: true };
 });
