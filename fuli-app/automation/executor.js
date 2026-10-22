@@ -136,7 +136,18 @@ class ActionExecutor {
 
           case 'spotify_play': {
             onProgress({ type: 'status', message: 'Finding it on Spotify…' });
-            const found = await spotify.resolve(step);
+            let found;
+            try {
+              found = await spotify.resolve(step);
+            } catch (err) {
+              // Not a song Spotify knows — a plain "play X" probably means a video
+              if (err.code === 'NO_MATCH' && step.fallback === 'youtube') {
+                onProgress({ type: 'status', message: 'Not a Spotify song — trying YouTube…' });
+                await youtubePlay(step.query, onProgress);
+                break;
+              }
+              throw err;
+            }
             const first = found.tracks[found.startIndex];
             if (step.autoplay !== false) {
               await spotify.playUri(first && first.uri, found.contextUri);

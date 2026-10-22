@@ -529,7 +529,7 @@ function renderPlayer(card) {
     list.appendChild(row);
   });
   if (card.noTracklist) {
-    list.appendChild(el('div', 'rc-empty', 'Playing in the background. Say “connect spotify” to see this playlist’s songs here.'));
+    list.appendChild(el('div', 'rc-empty', 'Playing in the background. Spotify only shows the songs of playlists you own — say “connect spotify” if you haven’t.'));
   }
   resultCard.appendChild(list);
   if (!card.idle) markCurrent(card.tracks[card.startIndex] && card.tracks[card.startIndex].uri, true);

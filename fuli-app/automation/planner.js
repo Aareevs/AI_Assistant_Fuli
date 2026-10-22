@@ -129,6 +129,18 @@ const CANDIDATE_MODELS = [
 
 const unquote = (x) => (x || '').replace(/^[\s"'“‘]+|[\s"'”’.]+$/g, '');
 
+// Sites Fuli can search directly ("search shoes on amazon"). Anything not listed falls back to a Google search.
+const SEARCH_SITES = {
+  amazon: 'https://www.amazon.com/s?k=', flipkart: 'https://www.flipkart.com/search?q=', ebay: 'https://www.ebay.com/sch/i.html?_nkw=',
+  maps: 'https://www.google.com/maps/search/', 'google maps': 'https://www.google.com/maps/search/',
+  wikipedia: 'https://en.wikipedia.org/w/index.php?search=', github: 'https://github.com/search?q=',
+  reddit: 'https://www.reddit.com/search/?q=', imdb: 'https://www.imdb.com/find/?q=',
+  'google images': 'https://www.google.com/search?tbm=isch&q=', images: 'https://www.google.com/search?tbm=isch&q=',
+  'google news': 'https://news.google.com/search?q=', news: 'https://news.google.com/search?q=',
+  twitter: 'https://x.com/search?q=', x: 'https://x.com/search?q=', 'stack overflow': 'https://stackoverflow.com/search?q=',
+  stackoverflow: 'https://stackoverflow.com/search?q=', 'google scholar': 'https://scholar.google.com/scholar?q='
+};
+
 const plan = (summary, ...steps) => ({ summary, steps: steps.map((st, i) => ({ id: i + 1, ...st })) });
 
 const WINDOW_WORDS = [
@@ -162,7 +174,8 @@ function tryFeaturePath(p, original) {
     }
     // "... on spotify" / "... spotify" at the end is just noise — drop it so the real request matches
     const bare = p.replace(/\s+(?:on|in|from|with|using|via)?\s*spotify$/, '');
-    if (bare && bare !== p) p = bare;
+    const sawSpotify = !!bare && bare !== p;
+    if (sawSpotify) p = bare;
     // "open/show" only displays the playlist or album; "play/start/shuffle" also starts it
     if (/^(?:(?:open|show|list|view|browse|see|get)\s+)?(?:me\s+)?(?:all\s+)?(?:of\s+)?(?:my\s+)?(?:spotify\s+)?playlists?(?:\s+(?:from|on|in|of)\s+spotify)?$/.test(p) || /^what(?:'s| are| is)\s+(?:in\s+)?my\s+(?:spotify\s+)?playlists?$/.test(p)) {
       return plan('Show your Spotify playlists', { description: 'Load your Spotify playlists', action: 'spotify_playlists' });
@@ -172,18 +185,21 @@ function tryFeaturePath(p, original) {
     if (pl) {
       const query = unquote(pl[2] || pl[3]);
       const autoplay = !isOpenVerb(pl[1]);
-      return plan(`${autoplay ? 'Play' : 'Open'} the ${query} playlist`, { description: `${autoplay ? 'Find and play' : 'Open'} "${query}" playlist`, action: 'spotify_play', kind: 'playlist', query, autoplay });
+      const mine = /\bmy\b/.test(p);
+      return plan(`${autoplay ? 'Play' : 'Open'} the ${query} playlist`, { description: `${autoplay ? 'Find and play' : 'Open'} "${query}" playlist`, action: 'spotify_play', kind: 'playlist', query, autoplay, mine });
     }
     const al = p.match(/^(play|open|show|view|put on|listen to)\s+(?:the\s+)?album\s+(.+?)(?:\s+by\s+(.+?))?(?:\s+on spotify)?$/);
     if (al) {
       const autoplay = !isOpenVerb(al[1]);
       return plan(`${autoplay ? 'Play' : 'Open'} the album ${al[2]}`, { description: `${autoplay ? 'Find and play' : 'Open'} album "${al[2]}"`, action: 'spotify_play', kind: 'album', query: unquote(al[2]), artist: al[3] && unquote(al[3]), autoplay });
     }
-    const tr = p.match(/^(?:play|put on|listen to)\s+(?:the\s+)?(?:song\s+|track\s+)?(.+?)(?:\s+by\s+(.+?))?(?:\s+on spotify)?$/);
-    if (tr && !/^(?:music|some music|something|it|again|next|previous|the next (?:song|track)|songs?)$/.test(tr[1])) {
-      const query = unquote(tr[1]);
-      const artist = tr[2] && unquote(tr[2]);
-      return plan(`Play ${query}${artist ? ` by ${artist}` : ''}`, { description: `Find and play "${query}"${artist ? ` by ${artist}` : ''}`, action: 'spotify_play', kind: 'track', query, artist });
+    const tr = p.match(/^(?:play|put on|listen to)\s+(?:the\s+)?(song\s+|track\s+)?(.+?)(?:\s+by\s+(.+?))?$/);
+    if (tr && !/\s(?:on|in)\s+youtube$/.test(p) && !/^(?:music|some music|something|it|again|next|previous|the next (?:song|track)|songs?)$/.test(tr[2])) {
+      const query = unquote(tr[2]);
+      const artist = tr[3] && unquote(tr[3]);
+      // "play X" with no hint that it's a song (no "song", "by <artist>" or "on spotify"): if Spotify has no real match, try YouTube
+      const explicit = !!tr[1] || !!tr[3] || sawSpotify;
+      return plan(`Play ${query}${artist ? ` by ${artist}` : ''}`, { description: `Find and play "${query}"${artist ? ` by ${artist}` : ''}`, action: 'spotify_play', kind: 'track', query, artist, ...(explicit ? {} : { fallback: 'youtube' }) });
     }
     if (/^(?:previous|last|go back(?: a)?)(?:\s+song|\s+track)?$/.test(p)) {
       return plan('Previous track', { description: 'Previous track', action: 'system_media', command: 'previous' });
@@ -229,6 +245,17 @@ function tryFeaturePath(p, original) {
   if (mailUnread) {
     const from = unquote(mailUnread[1] || '');
     return plan(from ? `Unread email from ${from}` : 'Check unread email', { description: from ? `Find unread email from ${from}` : 'Check unread email', action: 'gmail_unread', from });
+  }
+
+  // "search X on <site>" / "search <site> for X" — shows that site's results page
+  const siteSearch = p.match(/^(?:search|find|look up|look for)\s+(?:for\s+)?(.+?)\s+(?:on|in|at)\s+(?:the\s+)?([a-z ]+)$/) || (() => {
+    const m = p.match(/^(?:search|find)\s+(?:the\s+)?([a-z ]+?)\s+for\s+(.+)$/);
+    return m ? [m[0], m[2], m[1]] : null;
+  })();
+  if (siteSearch && SEARCH_SITES[siteSearch[2].trim()]) {
+    const query = unquote(siteSearch[1]);
+    const site = siteSearch[2].trim();
+    return plan(`Search ${site} for ${query}`, { description: `Search ${site} for "${query}"`, action: 'browser_navigate', url: SEARCH_SITES[site] + encodeURIComponent(query) });
   }
 
   // "search / find / open ... on YouTube" shows the results page; only "play / watch" opens the top video

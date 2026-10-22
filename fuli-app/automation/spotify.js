@@ -215,44 +215,91 @@ async function openPlaylist(id) {
   return { ...(await playlistDetails(id)), startIndex: 0 };
 }
 
+// Speech-to-text writes "MultiLang Songs" as "multi-lang playlist." etc., so compare loosely
+const squash = (x) => String(x).toLowerCase().replace(/\b(?:playlist|songs?|music|my|the)\b/g, ' ').replace(/[^a-z0-9]/g, '');
+
+function editSimilarity(a, b) {
+  if (!a.length || !b.length) return 0;
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+  }
+  return 1 - dp[a.length][b.length] / Math.max(a.length, b.length);
+}
+
+function nameScore(query, name) {
+  const q = squash(query);
+  const n = squash(name);
+  if (!q || !n) return 0;
+  if (q === n) return 1;
+  // one name inside the other: the closer in length, the better ("iphone" inside "mkbhd iphone review" is weak)
+  if (Math.min(q.length, n.length) >= 4 && (n.includes(q) || q.includes(n))) return 0.5 + 0.45 * (Math.min(q.length, n.length) / Math.max(q.length, n.length));
+  return editSimilarity(q, n);
+}
+
+// How well a track fits a spoken request: title, "title artist", or a request naming both in any order
+function trackMatch(query, t) {
+  const q = squash(query);
+  const name = squash(t.name);
+  const artistHit = (t.artists || []).some((a) => { const an = squash(a.name); return an.length >= 3 && q.includes(an); });
+  const both = name.length >= 3 && q.includes(name) && artistHit ? 0.95 : 0;
+  return Math.max(nameScore(query, t.name), nameScore(query, `${t.name} ${artistNames(t.artists)}`), both);
+}
+
 async function findOwnPlaylist(query) {
   if (!isConnected()) return null;
-  const q = query.toLowerCase().replace(/playlist/g, '').trim();
-  let url = '/me/playlists?limit=50';
-  for (let page = 0; page < 4 && url; page++) {
-    const r = await api(url);
-    const hit = (r.items || []).filter(Boolean).find((p) => p.name.toLowerCase() === q) || (r.items || []).filter(Boolean).find((p) => p.name.toLowerCase().includes(q));
-    if (hit) return hit;
-    url = r.next ? r.next.replace('https://api.spotify.com/v1', '') : null;
+  let best = null;
+  for (const p of await listPlaylists()) {
+    const score = nameScore(query, p.name);
+    if (!best || score > best.score) best = { ...p, score };
   }
-  return null;
+  return best && best.score >= 0.6 ? best : null;
 }
 
 // Resolve a spoken/typed request into something playable with Spotify's own cover art and track list.
-async function resolve({ kind, query, artist }) {
+// Spotify's relevance for a bare query is unreliable (limit=1 can return an unrelated song), so fetch several
+// results and pick the one whose name is closest to what was asked.
+const bestBy = (items, score) => items.filter(Boolean).map((item, i) => ({ item, s: score(item), i }))
+  .sort((x, y) => y.s - x.s || x.i - y.i)[0] || null;
+
+async function resolve({ kind, query, artist, mine, fallback }) {
   if (kind === 'playlist') {
     const own = await findOwnPlaylist(query).catch(() => null);
     if (own) return { ...(await playlistDetails(own.id)), startIndex: 0 };
-    const r = await api(`/search?type=playlist&limit=5&q=${encodeURIComponent(query)}`);
-    const hit = (r.playlists.items || []).find(Boolean);
+    // "my ... playlist" must never fall back to someone else's playlist from public search
+    if (mine && isConnected()) throw new Error(`No playlist like "${query}" in your library — say "open playlists from spotify" to see yours`);
+    const r = await api(`/search?type=playlist&limit=10&q=${encodeURIComponent(query)}`);
+    const hit = bestBy(r.playlists.items || [], (p) => nameScore(query, p.name));
     if (!hit) throw new Error(`Couldn't find a playlist called "${query}"`);
-    const details = await playlistDetails(hit.id);
+    const details = await playlistDetails(hit.item.id);
     return { ...details, startIndex: 0 };
   }
 
   if (kind === 'album') {
     const q = artist ? `album:${query} artist:${artist}` : query;
-    const r = await api(`/search?type=album&limit=1&q=${encodeURIComponent(q)}`);
-    const hit = r.albums.items[0];
+    const r = await api(`/search?type=album&limit=10&q=${encodeURIComponent(q)}`);
+    const hit = bestBy(r.albums.items || [], (a) => nameScore(query, a.name));
     if (!hit) throw new Error(`Couldn't find the album "${query}"`);
-    return { ...(await albumDetails(hit.id)), startIndex: 0 };
+    return { ...(await albumDetails(hit.item.id)), startIndex: 0 };
   }
 
   // Track: play it inside its album so the track list and next/previous make sense
-  let r = await api(`/search?type=track&limit=1&q=${encodeURIComponent(artist ? `track:${query} artist:${artist}` : query)}`);
-  if (!r.tracks.items.length && artist) r = await api(`/search?type=track&limit=1&q=${encodeURIComponent(`${query} ${artist}`)}`);
-  const track = r.tracks.items[0];
-  if (!track) throw new Error(`Couldn't find "${query}"${artist ? ` by ${artist}` : ''} on Spotify`);
+  let r = await api(`/search?type=track&limit=10&q=${encodeURIComponent(artist ? `track:${query} artist:${artist}` : query)}`);
+  if (!(r.tracks.items || []).filter(Boolean).length && artist) r = await api(`/search?type=track&limit=10&q=${encodeURIComponent(`${query} ${artist}`)}`);
+  const trackScore = (t) => trackMatch(query, t) + (artist ? 0.5 * nameScore(artist, artistNames(t.artists)) : 0);
+  const best = bestBy(r.tracks.items || [], trackScore);
+  const track = best && best.item;
+  const noMatch = (msg) => Object.assign(new Error(msg), { code: 'NO_MATCH' });
+  if (!track) throw noMatch(`Couldn't find "${query}"${artist ? ` by ${artist}` : ''} on Spotify`);
+  // A bare "play X" that isn't clearly a song: only accept the result if its title really resembles what was asked
+  // (and isn't an obscure novelty track like "How to Cook Pasta to Perfection")
+  if (fallback && (trackMatch(query, track) < 0.75
+      || (typeof track.popularity === 'number' && track.popularity < 20))) {
+    throw noMatch(`"${query}" doesn't look like a Spotify song`);
+  }
   const album = await albumDetails(track.album.id);
   const idx = album.tracks.findIndex((t) => t.uri === track.uri);
   if (idx < 0) {
