@@ -1,6 +1,11 @@
 const { planActions } = require('./planner');
 const { browserController } = require('./browser');
 const { systemController } = require('./system');
+const extras = require('./extras');
+
+// Electron-only helpers, loaded lazily so the executor still runs under plain Node tests
+const electron = () => require('electron');
+const say = (text) => { systemController.speak(text).catch(() => {}); };
 
 class ActionExecutor {
   constructor() {
@@ -97,7 +102,62 @@ class ActionExecutor {
             break;
 
           case 'system_media':
-            await systemController.mediaControl(step.action || step.command);
+            await systemController.mediaControl(step.command || step.mediaAction);
+            break;
+
+          case 'calc': {
+            const { result, expression } = extras.calculate(step.expression);
+            electron().clipboard.writeText(result);
+            onProgress({ type: 'card', card: { kind: 'result', title: result, subtitle: `${expression} · copied to clipboard` } });
+            say(`It's ${result}.`);
+            break;
+          }
+
+          case 'window_snap': {
+            const { screen } = electron();
+            const wa = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+            const appName = await extras.snapWindow(step.layout, wa);
+            onProgress({ type: 'card', card: { kind: 'result', title: `${appName} → ${step.layout.replace(/-/g, ' ')}`, subtitle: 'Window moved' } });
+            break;
+          }
+
+          case 'system_command': {
+            const msg = await extras.runSystemCommand(step.command);
+            onProgress({ type: 'card', card: { kind: 'result', title: msg, subtitle: 'System' } });
+            break;
+          }
+
+          case 'clipboard_show': {
+            const items = extras.clipboardHistory(step.query);
+            onProgress({ type: 'card', card: { kind: 'list', title: 'Clipboard history', hint: 'Click to copy', empty: 'Nothing copied yet.', items: items.map((c) => ({ text: c.text, ts: c.ts })) } });
+            break;
+          }
+
+          case 'clipboard_clear':
+            extras.clearClipboardHistory();
+            onProgress({ type: 'card', card: { kind: 'result', title: 'Clipboard history cleared', subtitle: 'Clipboard' } });
+            break;
+
+          case 'snippet_save':
+            extras.saveSnippet(step.name, step.text);
+            onProgress({ type: 'card', card: { kind: 'result', title: `Saved snippet “${step.name}”`, subtitle: 'Say or type “paste ' + step.name + ' snippet” to use it' } });
+            break;
+
+          case 'snippet_paste': {
+            const sn = extras.findSnippet(step.name);
+            if (!sn) throw new Error(`No snippet called "${step.name}"`);
+            electron().BrowserWindow.getAllWindows().forEach((w) => w.hide());
+            await extras.pasteIntoFrontmost(sn.text, (t) => electron().clipboard.writeText(t));
+            break;
+          }
+
+          case 'snippet_list':
+            onProgress({ type: 'card', card: { kind: 'list', title: 'Snippets', hint: 'Click to copy', empty: 'No snippets yet. Try “save snippet email: me@example.com”.', items: extras.snippets().map((sn) => ({ label: sn.name, text: sn.text, ts: sn.ts })) } });
+            break;
+
+          case 'snippet_delete':
+            if (!extras.deleteSnippet(step.name)) throw new Error(`No snippet called "${step.name}"`);
+            onProgress({ type: 'card', card: { kind: 'result', title: `Deleted snippet “${step.name}”`, subtitle: 'Snippets' } });
             break;
 
           case 'system_shell':

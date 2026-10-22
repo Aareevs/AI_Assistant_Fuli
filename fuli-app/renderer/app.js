@@ -8,6 +8,9 @@ const statusText = document.getElementById('statusText');
 const summaryText = document.getElementById('summaryText');
 const statusSpinner = document.getElementById('statusSpinner');
 const stepsList = document.getElementById('stepsList');
+const resultCard = document.getElementById('resultCard');
+const connectorsBtn = document.getElementById('connectorsBtn');
+const connectorsPanel = document.getElementById('connectorsPanel');
 
 let isRunning = false;
 let currentSteps = [];
@@ -127,6 +130,7 @@ function startExecution() {
   cancelBtn.classList.remove('hidden');
   promptInput.disabled = true;
 
+  clearCard();
   statusText.textContent = 'Fuli is planning your actions...';
   summaryText.textContent = '';
   statusSpinner.classList.remove('hidden');
@@ -157,6 +161,7 @@ submitBtn.addEventListener('click', startExecution);
 cancelBtn.addEventListener('click', stopExecution);
 if (closeBtn) {
   closeBtn.addEventListener('click', () => {
+    clearCard();
     resetToCleanState();
     window.fuliAPI.closeApp();
   });
@@ -201,6 +206,8 @@ window.fuliAPI.onProgress((data) => {
     updateStepStatus(data.stepId, 'active');
   } else if (data.type === 'step_done') {
     updateStepStatus(data.stepId, 'completed');
+  } else if (data.type === 'card') {
+    showCard(data.card);
   } else if (data.type === 'cancelled') {
     statusText.textContent = data.message;
     statusSpinner.classList.add('hidden');
@@ -230,3 +237,87 @@ window.fuliAPI.onError((err) => {
     statusText.style.color = '';
   }, 5000);
 });
+
+// ───────── Result cards (calculator, system, lists, Fuli player) ─────────
+let activePlayer = null;
+let pollTimer = null;
+let lastState = null;
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+function relTime(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+function clearCard() {
+  activePlayer = null;
+  stopPolling();
+  resultCard.innerHTML = '';
+  resultCard.classList.add('hidden');
+  actionCard.classList.remove('card-only');
+  stepsList.classList.remove('hidden');
+}
+
+function showCard(card) {
+  resultCard.innerHTML = '';
+  resultCard.classList.remove('hidden');
+  stepsList.classList.add('hidden');
+  actionCard.classList.add('card-only');
+  stopPolling();
+  activePlayer = null;
+
+  if (card.kind === 'result') {
+    resultCard.appendChild(el('div', 'rc-result-title', card.title));
+    if (card.subtitle) resultCard.appendChild(el('div', 'rc-result-sub', card.subtitle));
+    setExpanded(true, 160);
+  } else if (card.kind === 'list') {
+    renderListCard(card);
+  } else if (card.kind === 'player') {
+    activePlayer = card;
+    renderPlayer(card);
+    startPolling();
+  }
+}
+
+function renderListCard(card) {
+  const head = el('div', 'rc-list-head');
+  head.appendChild(el('span', 'rc-list-title', card.title));
+  head.appendChild(el('span', 'rc-list-hint', card.hint || ''));
+  resultCard.appendChild(head);
+  if (!card.items.length) resultCard.appendChild(el('div', 'rc-empty', card.empty));
+  const list = el('div', 'player-tracks');
+  list.style.borderTop = 'none';
+  list.style.marginTop = '0';
+  list.style.maxHeight = '260px';
+  card.items.forEach((item) => {
+    const row = el('div', 'rc-row');
+    if (item.label) row.appendChild(el('span', 'rc-row-label', item.label));
+    row.appendChild(el('span', 'rc-row-text', item.text.replace(/\s+/g, ' ')));
+    const meta = el('span', 'rc-row-meta', item.ts ? relTime(item.ts) : '');
+    row.appendChild(meta);
+    row.title = item.text;
+    row.addEventListener('click', async () => {
+      await window.fuliAPI.copyText(item.text);
+      row.classList.add('copied');
+      meta.textContent = 'Copied';
+    });
+    list.appendChild(row);
+  });
+  resultCard.appendChild(list);
+  setExpanded(true, Math.min(150 + Math.max(card.items.length, 1) * 36, 420));
+}
+
+function stopPolling() {
+  clearInterval(pollTimer);
+  pollTimer = null;
+}
+

@@ -49,5 +49,7 @@ contextBridge.exposeInMainWorld('fuliAPI', {
     return () => ipcRenderer.removeListener('fuli:set-status', handler);
   },
 
-  triggerMicListen: () => ipcRenderer.send('fuli:trigger-mic-listen')
+  triggerMicListen: () => ipcRenderer.send('fuli:trigger-mic-listen'),
+
+  copyText: (text) => ipcRenderer.invoke('fuli:copy-text', text)
 });

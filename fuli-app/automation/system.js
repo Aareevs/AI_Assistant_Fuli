@@ -123,12 +123,13 @@ class SystemController {
       // macOS AppleScript
       let script = '';
       if (act === 'play' || act === 'pause' || act === 'toggle') {
+        const verb = act === 'toggle' ? 'playpause' : act;
         script = `
           tell application "System Events"
             if exists (process "Spotify") then
-              tell application "Spotify" to playpause
+              tell application "Spotify" to ${verb}
             else if exists (process "Music") then
-              tell application "Music" to playpause
+              tell application "Music" to ${verb}
             end if
           end tell`;
       } else if (act === 'next') {

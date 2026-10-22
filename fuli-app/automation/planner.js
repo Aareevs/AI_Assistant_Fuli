@@ -56,7 +56,7 @@ Supported ACTION_TYPEs:
    Use to set the macOS system output volume (0 to 100) or mute (0).
 
 9. "system_media"
-   Parameters: { "action": "play" | "pause" | "next" | "previous" | "toggle" }
+   Parameters: { "command": "play" | "pause" | "next" | "previous" | "toggle" }
    Use to control playback on Spotify or Apple Music.
 
 10. "system_shell"
@@ -75,6 +75,19 @@ Supported ACTION_TYPEs:
     Parameters: { "text": "Spoken text" }
     Use to speak a response aloud to the user in Fuli's natural female voice.
 
+16. "calc"
+    Parameters: { "expression": "2*(3+4)" | "15% of 80" | "10 km to miles" }
+
+17. "window_snap"
+    Parameters: { "layout": "left-half" | "right-half" | "top-half" | "bottom-half" | "top-left" | "top-right" | "bottom-left" | "bottom-right" | "left-third" | "center-third" | "right-third" | "left-two-thirds" | "right-two-thirds" | "maximize" | "center" }
+
+18. "system_command"
+    Parameters: { "command": "lock" | "sleep" | "dark-mode-on" | "dark-mode-off" | "dark-mode-toggle" | "empty-trash" | "caffeinate-on" | "caffeinate-off" | "unmute" | "volume-up" | "volume-down" }
+
+19. "clipboard_show" (no params) — show clipboard history. "clipboard_clear" — clear it.
+
+20. "snippet_save" { "name", "text" }, "snippet_paste" { "name" }, "snippet_list" {}, "snippet_delete" { "name" }
+
 Rules:
 - For web search commands ("Go to Google and search X", "Search X on Google"):
   Step 1: browser_navigate to "https://www.google.com"
@@ -83,8 +96,8 @@ Rules:
   Step 4: speak confirmation (e.g. "I've searched for X on Google for you.")
 - For device commands:
   "Turn volume up/down to 50" -> system_volume { percent: 50 }, speak { text: "Volume set to 50 percent." }
-  "Play music" -> system_media { action: "play" }, speak { text: "Resuming music." }
-  "Pause music" -> system_media { action: "pause" }, speak { text: "Music paused." }
+  "Play music" -> system_media { command: "play" }, speak { text: "Resuming music." }
+  "Pause music" -> system_media { command: "pause" }, speak { text: "Music paused." }
   "Open Spotify" -> app_open { appName: "Spotify" }, speak { text: "Opening Spotify." }
   "Close/Quit Slack" -> app_quit { appName: "Slack" }, speak { text: "Closed Slack." }
 - Always include a final or intermediate "speak" step so Fuli verbally speaks back to the user!
@@ -97,6 +110,83 @@ const CANDIDATE_MODELS = [
   'gemini-2.5-flash'
 ];
 
+
+const plan = (summary, ...steps) => ({ summary, steps: steps.map((st, i) => ({ id: i + 1, ...st })) });
+
+const WINDOW_WORDS = [
+  [/^(?:the\s+)?left(?:\s+half|\s+side)?$/, 'left-half'], [/^(?:the\s+)?right(?:\s+half|\s+side)?$/, 'right-half'],
+  [/^(?:the\s+)?top(?:\s+half)?$/, 'top-half'], [/^(?:the\s+)?bottom(?:\s+half)?$/, 'bottom-half'],
+  [/^(?:the\s+)?top[\s-]left(?:\s+corner|\s+quarter)?$/, 'top-left'], [/^(?:the\s+)?top[\s-]right(?:\s+corner|\s+quarter)?$/, 'top-right'],
+  [/^(?:the\s+)?bottom[\s-]left(?:\s+corner|\s+quarter)?$/, 'bottom-left'], [/^(?:the\s+)?bottom[\s-]right(?:\s+corner|\s+quarter)?$/, 'bottom-right'],
+  [/^(?:the\s+)?(?:left|first)\s+third$/, 'left-third'], [/^(?:the\s+)?(?:center|middle)\s+third$/, 'center-third'], [/^(?:the\s+)?(?:right|last)\s+third$/, 'right-third'],
+  [/^(?:the\s+)?(?:left|first)\s+two\s+thirds$/, 'left-two-thirds'], [/^(?:the\s+)?(?:right|last)\s+two\s+thirds$/, 'right-two-thirds'],
+  [/^(?:max(?:imize|imum)?|full(?:\s*screen)?|fill(?:\s+the\s+screen)?)$/, 'maximize'], [/^(?:the\s+)?(?:center|middle)$/, 'center']
+];
+
+function windowLayout(where) {
+  const hit = WINDOW_WORDS.find(([re]) => re.test(where.trim()));
+  return hit ? hit[1] : null;
+}
+
+// Feature commands (Spotify, calculator, windows, system, clipboard, snippets) — typed or spoken.
+function tryFeaturePath(p, original) {
+  // ── Spotify ──
+  // ── Calculator & conversions ──
+  const calcMatch = p.match(/^(?:calculate|calc|compute|convert|what(?:'s| is)|whats|how much is)\s+(.+?)\??$/) || (/^[\d\s.,+\-*/^%()x×÷]+$/.test(p) && /\d\s*[-+*/^%x×÷]\s*\d/.test(p) ? [p, p] : null);
+  if (calcMatch && /\d/.test(calcMatch[1])) {
+    return plan(`Calculate ${calcMatch[1]}`, { description: `Calculate ${calcMatch[1]}`, action: 'calc', expression: calcMatch[1] });
+  }
+
+  // ── Window snapping ──
+  const win = p.match(/^(?:snap|move|put|tile|send|make)?\s*(?:the\s+|this\s+|my\s+)?window\s+(?:to\s+)?(?:the\s+)?(.+)$/)
+    || p.match(/^(?:snap|move|put|tile)\s+(?:it\s+)?(?:to\s+)?(?:the\s+)?(.+)$/);
+  const winVerb = p.match(/^(maximi[sz]e|center|centre)(?:\s+(?:the|this|my))?\s+window$/);
+  const layout = winVerb ? (winVerb[1].startsWith('max') ? 'maximize' : 'center') : win ? windowLayout(win[1]) : null;
+  if (layout) {
+    return plan(`Snap window: ${layout.replace(/-/g, ' ')}`, { description: `Move window to ${layout.replace(/-/g, ' ')}`, action: 'window_snap', layout });
+  }
+
+  // ── System ──
+  const systemPhrases = [
+    [/^lock(?:\s+(?:the\s+)?(?:screen|my mac|my computer|computer|mac))?$/, 'lock'],
+    [/^(?:go to sleep|sleep|put (?:my |the )?(?:mac|computer) to sleep)$/, 'sleep'],
+    [/^(?:turn on|enable|switch to|use)\s+dark mode$|^dark mode(?: on)?$/, 'dark-mode-on'],
+    [/^(?:turn off|disable)\s+dark mode$|^(?:turn on|enable|switch to|use)\s+light mode$|^light mode$/, 'dark-mode-off'],
+    [/^toggle\s+(?:dark|light)\s+mode$/, 'dark-mode-toggle'],
+    [/^empty(?:\s+the)?\s+(?:trash|bin|recycle bin)$/, 'empty-trash'],
+    [/^(?:keep (?:my |the )?(?:mac|computer|screen) awake|caffeinate|don'?t (?:let (?:my )?mac )?sleep|stay awake)$/, 'caffeinate-on'],
+    [/^(?:stop keeping (?:it |my mac |the mac )?awake|let (?:my |the )?mac sleep|stop caffeinate|decaffeinate)$/, 'caffeinate-off'],
+    [/^unmute$/, 'unmute'],
+    [/^(?:volume up|turn (?:it|the volume) up|louder|increase (?:the )?volume)$/, 'volume-up'],
+    [/^(?:volume down|turn (?:it|the volume) down|quieter|lower (?:the )?volume|decrease (?:the )?volume)$/, 'volume-down']
+  ];
+  const sys = systemPhrases.find(([re]) => re.test(p));
+  if (sys) return plan(sys[1].replace(/-/g, ' '), { description: `Run: ${sys[1].replace(/-/g, ' ')}`, action: 'system_command', command: sys[1] });
+
+  // ── Clipboard history ──
+  if (/^(?:show|open|view)?\s*(?:me\s+)?(?:my\s+)?clipboard(?:\s+history)?$|^what did i (?:just )?copy$/.test(p)) {
+    return plan('Show clipboard history', { description: 'Show clipboard history', action: 'clipboard_show' });
+  }
+  if (/^(?:clear|delete|wipe)\s+(?:my\s+)?clipboard(?:\s+history)?$/.test(p)) {
+    return plan('Clear clipboard history', { description: 'Clear clipboard history', action: 'clipboard_clear' });
+  }
+
+  // ── Snippets (keep original casing for the text) ──
+  const saveSn = original.match(/^(?:save|create|add|make)\s+(?:a\s+)?snippet\s+(?:called\s+|named\s+)?["']?(.+?)["']?\s*(?::|=|\bas\b|\bwith text\b|\bsaying\b|\bthat says\b)\s*([\s\S]+)$/i);
+  if (saveSn) {
+    return plan(`Save snippet "${saveSn[1]}"`, { description: `Save snippet "${saveSn[1]}"`, action: 'snippet_save', name: saveSn[1].trim(), text: saveSn[2].trim() });
+  }
+  if (/^(?:show|list|open)\s+(?:my\s+|all\s+)?snippets$/.test(p) || p === 'snippets') {
+    return plan('Show snippets', { description: 'Show snippets', action: 'snippet_list' });
+  }
+  const delSn = p.match(/^(?:delete|remove)\s+(?:the\s+)?(?:snippet\s+(.+)|(.+?)\s+snippet)$/);
+  if (delSn) return plan('Delete snippet', { description: `Delete snippet "${delSn[1] || delSn[2]}"`, action: 'snippet_delete', name: (delSn[1] || delSn[2]).trim() });
+  const pasteSn = p.match(/^(?:paste|insert|type|use)\s+(?:the\s+|my\s+)?(?:snippet\s+(.+)|(.+?)\s+snippet)$/);
+  if (pasteSn) return plan('Paste snippet', { description: `Paste snippet "${pasteSn[1] || pasteSn[2]}"`, action: 'snippet_paste', name: (pasteSn[1] || pasteSn[2]).trim() });
+
+  return null;
+}
+
 function tryFastPath(prompt) {
   let p = prompt.trim().toLowerCase();
   // Strip trailing punctuation (. ! ? , ;) from speech transcripts
@@ -105,6 +195,9 @@ function tryFastPath(prompt) {
   p = p.replace(/^["']|["']$/g, '').trim();
   // Strip leading polite words
   p = p.replace(/^(?:please|can you|could you)\s+/, '').trim();
+
+  const featurePlan = tryFeaturePath(p, prompt.trim().replace(/^(?:please|can you|could you)\s+/i, '').replace(/[.!?\s]+$/, ''));
+  if (featurePlan) return featurePlan;
 
   // 1. Open Google / Google search
   if (/^(open\s+)?google$/i.test(p) || /^go to google$/i.test(p) || /^can you open google$/i.test(p)) {
@@ -193,7 +286,7 @@ function tryFastPath(prompt) {
     return {
       summary: "Resume music playback",
       steps: [
-        { id: 1, description: "Play music", action: "system_media", action: "play" },
+        { id: 1, description: "Play music", action: "system_media", command: "play" },
         { id: 2, description: "Confirm playback", action: "speak", text: "Playing music." }
       ]
     };
@@ -202,7 +295,7 @@ function tryFastPath(prompt) {
     return {
       summary: "Pause music playback",
       steps: [
-        { id: 1, description: "Pause music", action: "system_media", action: "pause" },
+        { id: 1, description: "Pause music", action: "system_media", command: "pause" },
         { id: 2, description: "Confirm pause", action: "speak", text: "Music paused." }
       ]
     };
@@ -211,7 +304,7 @@ function tryFastPath(prompt) {
     return {
       summary: "Skip to next track",
       steps: [
-        { id: 1, description: "Next track", action: "system_media", action: "next" },
+        { id: 1, description: "Next track", action: "system_media", command: "next" },
         { id: 2, description: "Confirm next track", action: "speak", text: "Playing next track." }
       ]
     };

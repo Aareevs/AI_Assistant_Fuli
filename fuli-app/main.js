@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage, systemPreferences } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage, systemPreferences, clipboard } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -31,6 +31,7 @@ for (const envPath of envCandidates) {
 }
 
 const { actionExecutor } = require('./automation/executor');
+const extras = require('./automation/extras');
 const http = require('http');
 
 const isWin = process.platform === 'win32';
@@ -253,8 +254,13 @@ function createWindow() {
   });
 }
 
-function showWindow() {
+async function showWindow() {
   if (!mainWindow) return;
+
+  // Remember the app in front so window snapping / snippet pasting act on it, not on Fuli
+  if (!mainWindow.isVisible()) {
+    await Promise.race([extras.captureFrontmost(), new Promise((r) => setTimeout(r, 250))]);
+  }
 
   allowBlurHide = false;
   focusTimestamp = Date.now();
@@ -403,6 +409,11 @@ app.whenReady().then(() => {
   createTray();
   startLocalCommandServer();
 
+  // Clipboard history: sample the clipboard and keep recent text entries
+  setInterval(() => {
+    try { extras.recordClipboard(clipboard.readText()); } catch (e) {}
+  }, 1000);
+
   // Request macOS microphone permission so Fuli can hear voice commands
   if (process.platform === 'darwin' && systemPreferences && systemPreferences.askForMediaAccess) {
     systemPreferences.askForMediaAccess('microphone').then((granted) => {
@@ -504,4 +515,9 @@ ipcMain.on('fuli:trigger-mic-listen', () => {
   try {
     http.get('http://127.0.0.1:8766/listen', () => {}).on('error', () => {});
   } catch (e) {}
+});
+
+ipcMain.handle('fuli:copy-text', (event, text) => {
+  clipboard.writeText(String(text || ''));
+  return { ok: true };
 });
