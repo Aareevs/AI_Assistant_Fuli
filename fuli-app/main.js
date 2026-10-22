@@ -204,6 +204,8 @@ function createWindow() {
     hiddenInMissionControl: isMac,
     hasShadow: true,
     show: false,
+    vibrancy: isMac ? 'under-window' : undefined,
+    visualEffectState: 'active',
     type: isMac ? 'panel' : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

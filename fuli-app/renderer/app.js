@@ -210,8 +210,8 @@ window.fuliAPI.onProgress((data) => {
 
 window.fuliAPI.onComplete((result) => {
   statusSpinner.classList.add('hidden');
-  statusText.textContent = '✓ Actions completed successfully!';
-  statusText.style.color = '#4ade80';
+  statusText.textContent = 'Done';
+  statusText.style.color = '#5fd68a';
   resetUIState();
 
   // Reset color after 4 seconds
@@ -223,7 +223,7 @@ window.fuliAPI.onComplete((result) => {
 window.fuliAPI.onError((err) => {
   statusSpinner.classList.add('hidden');
   statusText.textContent = `Error: ${err.message}`;
-  statusText.style.color = '#ef4444';
+  statusText.style.color = '#ff8585';
   resetUIState();
 
   setTimeout(() => {
