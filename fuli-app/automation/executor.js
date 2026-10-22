@@ -118,6 +118,12 @@ class ActionExecutor {
             break;
           }
 
+          case 'spotify_playlists': {
+            const items = await spotify.listPlaylists();
+            onProgress({ type: 'card', card: { kind: 'playlists', items } });
+            break;
+          }
+
           case 'spotify_connect': {
             onProgress({ type: 'status', message: 'Approve Fuli in the Spotify page that just opened…' });
             const wins = electron().BrowserWindow.getAllWindows();

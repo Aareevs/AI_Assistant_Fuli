@@ -523,6 +523,7 @@ ipcMain.handle('fuli:spotify', async (event, cmd, arg) => {
   try {
     if (cmd === 'state') return { ok: true, data: await spotify.state() };
     if (cmd === 'status') return { ok: true, data: spotify.status() };
+    if (cmd === 'playlist') return { ok: true, data: await spotify.openPlaylist(arg) };
     if (cmd === 'connect') {
       // Step out of the way (Fuli floats above everything) while the Spotify login page is in the browser
       isTaskRunning = true;

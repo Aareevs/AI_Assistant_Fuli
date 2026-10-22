@@ -252,6 +252,7 @@ window.fuliAPI.onError((err) => {
 
 // ───────── Result cards (calculator, system, lists, Fuli player) ─────────
 let activePlayer = null;
+let playlistsCache = null;
 let pollTimer = null;
 let lastState = null;
 
@@ -303,6 +304,9 @@ function showCard(card) {
     setExpanded(true, 160);
   } else if (card.kind === 'list') {
     renderListCard(card);
+  } else if (card.kind === 'playlists') {
+    playlistsCache = card;
+    renderPlaylists(card);
   } else if (card.kind === 'player') {
     activePlayer = card;
     renderPlayer(card);
@@ -338,7 +342,57 @@ function renderListCard(card) {
   setExpanded(true, Math.min(150 + Math.max(card.items.length, 1) * 36, 420));
 }
 
+function renderPlaylists(card) {
+  const head = el('div', 'rc-list-head');
+  head.appendChild(el('span', 'rc-list-title', `Your playlists · ${card.items.length}`));
+  head.appendChild(el('span', 'rc-list-hint', 'Click to open · ▶ to play'));
+  resultCard.appendChild(head);
+  if (!card.items.length) resultCard.appendChild(el('div', 'rc-empty', 'No playlists found on this Spotify account.'));
+
+  const list = el('div', 'player-tracks pl-list');
+  card.items.forEach((pl) => {
+    const row = el('div', 'pt-row pl-row');
+    const img = el('img', 'pl-cover');
+    if (pl.cover) { img.src = pl.cover; img.loading = 'lazy'; }
+    row.appendChild(img);
+    const text = el('div', 'pt-text');
+    text.appendChild(el('div', 'pt-name', pl.name));
+    text.appendChild(el('div', 'pt-artist', [pl.owner, pl.total != null ? `${pl.total} songs` : null].filter(Boolean).join(' · ')));
+    row.appendChild(text);
+    const play = el('button', 'pl-play');
+    play.innerHTML = ICONS.play;
+    play.title = 'Play';
+    play.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      statusText.textContent = `Playing ${pl.name}…`;
+      const r = await window.fuliAPI.spotify('playlist', pl.id);
+      if (!r || !r.ok) return;
+      const first = r.data.tracks[0];
+      await window.fuliAPI.spotify('play-track', { uri: first ? first.uri : null, contextUri: r.data.contextUri });
+      showCard({ ...r.data, kind: 'player', mediaKind: 'playlist', fromList: true });
+    });
+    row.appendChild(play);
+    row.addEventListener('click', async () => {
+      row.style.opacity = '0.6';
+      const r = await window.fuliAPI.spotify('playlist', pl.id);
+      row.style.opacity = '';
+      if (r && r.ok) showCard({ ...r.data, kind: 'player', mediaKind: 'playlist', idle: true, fromList: true });
+    });
+    list.appendChild(row);
+  });
+  list.style.maxHeight = '310px';
+  list.style.borderTop = 'none';
+  list.style.marginTop = '0';
+  resultCard.appendChild(list);
+  setExpanded(true, Math.min(150 + card.items.length * 52, 440));
+}
+
 function renderPlayer(card) {
+  if (card.fromList && playlistsCache) {
+    const back = el('button', 'rc-back', '‹ Your playlists');
+    back.addEventListener('click', () => showCard(playlistsCache));
+    resultCard.appendChild(back);
+  }
   const top = el('div', 'player-top');
   const cover = el('img', 'player-cover');
   cover.id = 'playerCover';

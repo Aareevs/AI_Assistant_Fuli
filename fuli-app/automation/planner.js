@@ -80,6 +80,8 @@ Supported ACTION_TYPEs:
     Parameters: { "kind": "track" | "playlist" | "album", "query": "song/playlist/album name", "artist": "optional artist" }
     Use whenever the user wants a specific song, playlist or album played. Fuli shows its own player with Spotify's cover art and track list.
 
+14a. "spotify_playlists" {} shows a list of the user's own Spotify playlists.
+
 14b. "spotify_connect" {} signs the user in to Spotify via browser; "spotify_disconnect" {}.
 
 15. "spotify_now_playing"
@@ -159,6 +161,9 @@ function tryFeaturePath(p, original) {
     const bare = p.replace(/\s+(?:on|in|from|with|using|via)?\s*spotify$/, '');
     if (bare && bare !== p) p = bare;
     // "open/show" only displays the playlist or album; "play/start/shuffle" also starts it
+    if (/^(?:(?:open|show|list|view|browse|see|get)\s+)?(?:me\s+)?(?:all\s+)?(?:of\s+)?(?:my\s+)?(?:spotify\s+)?playlists?(?:\s+(?:from|on|in|of)\s+spotify)?$/.test(p) || /^what(?:'s| are| is)\s+(?:in\s+)?my\s+(?:spotify\s+)?playlists?$/.test(p)) {
+      return plan('Show your Spotify playlists', { description: 'Load your Spotify playlists', action: 'spotify_playlists' });
+    }
     const isOpenVerb = (v) => /^(?:open|show|view|browse)$/.test(v);
     const pl = p.match(/^(open|show|view|browse|play|start|put on|shuffle|listen to)\s+(?:me\s+)?(?:the\s+|my\s+)?(?:playlist\s+(.+?)|(.+?)\s+playlist)(?:\s+on spotify)?$/);
     if (pl) {
