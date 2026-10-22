@@ -53,6 +53,12 @@ contextBridge.exposeInMainWorld('fuliAPI', {
 
   spotify: (cmd, arg) => ipcRenderer.invoke('fuli:spotify', cmd, arg),
   copyText: (text) => ipcRenderer.invoke('fuli:copy-text', text),
+  onOpenConnectors: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('fuli:open-connectors', handler);
+    return () => ipcRenderer.removeListener('fuli:open-connectors', handler);
+  },
+
   google: (cmd, arg) => ipcRenderer.invoke('fuli:google', cmd, arg),
   openUrl: (url) => ipcRenderer.invoke('fuli:open-url', url)
 });

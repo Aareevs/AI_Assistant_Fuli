@@ -674,6 +674,9 @@ async function renderConnectors() {
   applyHeight();
 }
 
+// The tray menu's "Connectors…" and Spotify/Google items open the panel
+window.fuliAPI.onOpenConnectors(() => { if (connectorsPanel.classList.contains('hidden')) connectorsBtn.click(); });
+
 connectorsBtn.addEventListener('click', async () => {
   if (!connectorsPanel.classList.contains('hidden')) return closeConnectors();
   connectorsPanel.classList.remove('hidden');

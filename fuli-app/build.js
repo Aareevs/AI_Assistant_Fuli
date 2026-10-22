@@ -130,6 +130,15 @@ if (targetPlatform === 'win32') {
       }
     }
 
+    // Re-seal the bundle. We edit it after packaging (icon, .env, Info.plist) and VMP signing writes extra files, which
+    // breaks the code signature; macOS then refuses to open the app normally. castlabs' order is: VMP sign, then codesign.
+    try {
+      execSync(`codesign --force --deep --sign - "${bundlePath}"`, { stdio: 'pipe' });
+      console.log('✓ Re-sealed app bundle (codesign)');
+    } catch (e) {
+      console.warn('codesign step failed:', String(e.stderr || e.message).split('\n')[0]);
+    }
+
     const appDest = '/Applications/Fuli.app';
     try {
       if (fs.existsSync(appDest)) {
@@ -142,40 +151,12 @@ if (targetPlatform === 'win32') {
       console.warn('Could not copy to /Applications:', e.message);
     }
 
-    const launchAgentsDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
-    const launchAgentPlist = path.join(launchAgentsDir, 'com.aareev.fuli.plist');
-    try {
-      fs.mkdirSync(launchAgentsDir, { recursive: true });
-      const plistXml = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.aareev.fuli</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/Applications/Fuli.app/Contents/MacOS/Fuli</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>ProcessType</key>
-    <string>Interactive</string>
-    <key>StandardOutPath</key>
-    <string>/tmp/fuli_app.log</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/fuli_app.err</string>
-</dict>
-</plist>`;
-      fs.writeFileSync(launchAgentPlist, plistXml);
-      try {
-        execSync(`launchctl unload "${launchAgentPlist}" 2>/dev/null || true`);
-        execSync(`launchctl load "${launchAgentPlist}"`);
-      } catch {}
-      console.log('✓ Registered macOS LaunchAgent (KeepAlive: true, RunAtLoad: true)');
-    } catch (e) {
-      console.warn('LaunchAgent registration notice:', e.message);
+    // Older builds installed a LaunchAgent with KeepAlive, which relaunched Fuli right after "Quit Fuli" and
+    // started it at login no matter what the menu said. Starting at login is now the menu's own checkbox.
+    const oldAgent = path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.aareev.fuli.plist');
+    if (fs.existsSync(oldAgent)) {
+      try { execSync(`launchctl bootout gui/$(id -u) "${oldAgent}" 2>/dev/null || launchctl unload "${oldAgent}" 2>/dev/null || true`); } catch {}
+      try { fs.unlinkSync(oldAgent); console.log('✓ Removed old Fuli LaunchAgent (Quit now really quits)'); } catch {}
     }
 
     try {

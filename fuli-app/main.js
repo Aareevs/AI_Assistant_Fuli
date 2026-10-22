@@ -40,6 +40,21 @@ const http = require('http');
 const isWin = process.platform === 'win32';
 const isMac = process.platform === 'darwin';
 
+// Small persisted settings (voice on/off, first-run defaults)
+const SETTINGS_FILE = path.join(os.homedir(), '.fuli', 'settings.json');
+function loadSettings() {
+  try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch (e) { return {}; }
+}
+function saveSettings(patch) {
+  const next = { ...loadSettings(), ...patch };
+  try {
+    fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(next, null, 2));
+  } catch (e) {}
+  return next;
+}
+let voiceEnabled = loadSettings().voiceEnabled !== false;
+
 const LOG_FILE = path.join(os.tmpdir(), 'fuli_app.log');
 function logFuli(...args) {
   const line = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
@@ -157,34 +172,64 @@ function createTray() {
   tray = new Tray(icon);
   tray.setToolTip('Fuli');
 
-  const contextMenu = Menu.buildFromTemplate([
-    { 
-      label: 'Toggle Fuli', 
-      accelerator: isMac ? 'Alt+Space' : 'Alt+Space',
-      click: toggleWindow 
-    },
+  // Clicking the icon only shows the menu — it never opens or toggles Fuli itself
+  const popUp = () => tray.popUpContextMenu(buildTrayMenu());
+  tray.on('click', popUp);
+  tray.on('right-click', popUp);
+}
+
+async function openConnectors() {
+  await showWindow();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('fuli:open-connectors');
+}
+
+function setVoiceEnabled(on) {
+  voiceEnabled = on;
+  saveSettings({ voiceEnabled: on });
+  if (on) {
+    startVoiceOperator();
+  } else if (voiceProcess) {
+    try { voiceProcess.kill('SIGTERM'); } catch (e) {}
+  }
+}
+
+// Rebuilt every time the icon is clicked so the connection status is always current
+function buildTrayMenu() {
+  const sp = spotify.status();
+  const gg = google.status();
+  const item = (label, connected, who) => ({
+    label,
+    type: 'checkbox',
+    checked: !!connected,
+    sublabel: connected ? `Connected${who ? ` as ${who}` : ''}` : 'Not connected — click to set up',
+    click: openConnectors
+  });
+
+  return Menu.buildFromTemplate([
+    { label: 'Fuli', sublabel: voiceEnabled ? 'Listening for “Fuli”' : 'Voice is off', enabled: false },
+    { type: 'separator' },
+    { label: 'Open Fuli', accelerator: 'Alt+Space', click: () => showWindow() },
+    { label: 'Connectors…', click: openConnectors },
+    { type: 'separator' },
+    item('Spotify', sp.connected, sp.name),
+    item('Google', gg.connected, gg.name),
     { type: 'separator' },
     {
-      label: 'Launch at Login',
+      label: 'Listen for “Fuli”',
+      sublabel: 'Say it to open Fuli hands-free',
+      type: 'checkbox',
+      checked: voiceEnabled,
+      click: (menuItem) => setVoiceEnabled(menuItem.checked)
+    },
+    {
+      label: 'Start Fuli when I log in',
       type: 'checkbox',
       checked: app.getLoginItemSettings().openAtLogin,
-      click: (item) => {
-        app.setLoginItemSettings({
-          openAtLogin: item.checked,
-          openAsHidden: true
-        });
-      }
+      click: (menuItem) => app.setLoginItemSettings({ openAtLogin: menuItem.checked, openAsHidden: true })
     },
     { type: 'separator' },
-    { 
-      label: 'Quit Fuli', 
-      accelerator: 'CmdOrCtrl+Q',
-      click: () => app.quit() 
-    }
+    { label: 'Quit Fuli', accelerator: 'CmdOrCtrl+Q', click: () => app.quit() }
   ]);
-
-  tray.setContextMenu(contextMenu);
-  tray.on('click', toggleWindow);
 }
 
 function createWindow() {
@@ -303,6 +348,7 @@ function toggleWindow() {
 }
 
 function startVoiceOperator() {
+  if (!voiceEnabled || voiceProcess) return;
   const possibleScriptPaths = [
     path.join(os.homedir(), 'VS-Code', 'AI_Assistant_Fuli', 'fuli', 'voice_operator.py'),
     path.join(os.homedir(), 'VS-Code', 'Tier I Projects', 'AI_Assistant_Fuli', 'fuli', 'voice_operator.py'),
@@ -385,7 +431,7 @@ function startVoiceOperator() {
   voiceProcess.on('exit', (code) => {
     logFuli(`Voice operator exited with code ${code}`);
     voiceProcess = null;
-    if (!app.isQuitting) {
+    if (!app.isQuitting && voiceEnabled) {
       setTimeout(startVoiceOperator, 3000);
     }
   });
@@ -408,12 +454,12 @@ app.whenReady().then(async () => {
     }
   }
 
-  // Set seamless launch on system login for background availability
+  // Start at login by default the first time only; after that the menu checkbox is in charge
   try {
-    app.setLoginItemSettings({
-      openAtLogin: true,
-      openAsHidden: true
-    });
+    if (!loadSettings().loginItemSeeded) {
+      app.setLoginItemSettings({ openAtLogin: true, openAsHidden: true });
+      saveSettings({ loginItemSeeded: true });
+    }
   } catch (e) {}
 
   createWindow();
