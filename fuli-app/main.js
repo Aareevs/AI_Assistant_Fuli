@@ -34,6 +34,7 @@ const { actionExecutor } = require('./automation/executor');
 const spotify = require('./automation/spotify');
 const extras = require('./automation/extras');
 const player = require('./automation/player');
+const google = require('./automation/google');
 const http = require('http');
 
 const isWin = process.platform === 'win32';
@@ -554,5 +555,29 @@ ipcMain.handle('fuli:spotify', async (event, cmd, arg) => {
 
 ipcMain.handle('fuli:copy-text', (event, text) => {
   clipboard.writeText(String(text || ''));
+  return { ok: true };
+});
+
+// Google connector (Calendar, Gmail, YouTube)
+ipcMain.handle('fuli:google', async (event, cmd, arg) => {
+  try {
+    if (cmd === 'status') return { ok: true, data: google.status() };
+    if (cmd === 'disconnect') { await google.disconnect(); return { ok: true, data: google.status() }; }
+    if (cmd === 'delete-event') { await google.deleteEvent(arg); return { ok: true }; }
+    if (cmd === 'connect') {
+      // Step out of the way (Fuli floats above everything) while the Google login page is in the browser
+      isTaskRunning = true;
+      hideWindow();
+      try { await google.connect(); } finally { isTaskRunning = false; showWindow(); }
+      return { ok: true, data: google.status() };
+    }
+    return { ok: false, error: `Unknown command: ${cmd}` };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('fuli:open-url', (event, url) => {
+  if (/^https:\/\/(?:[\w-]+\.)?(?:google|youtube)\.com\//.test(String(url))) require('electron').shell.openExternal(url);
   return { ok: true };
 });

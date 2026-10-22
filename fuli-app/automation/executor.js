@@ -2,6 +2,7 @@ const { planActions } = require('./planner');
 const { browserController } = require('./browser');
 const { systemController } = require('./system');
 const spotify = require('./spotify');
+const google = require('./google');
 const extras = require('./extras');
 
 // Electron-only helpers, loaded lazily so the executor still runs under plain Node tests
@@ -9,6 +10,18 @@ const electron = () => require('electron');
 // Fuli only talks back when the command itself was spoken; typed commands stay silent
 let speakReplies = false;
 
+// Play a YouTube video (top search result). Without a Google login, open the results page instead.
+async function youtubePlay(query, onProgress) {
+  if (!google.isConnected()) {
+    await browserController.navigate(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`);
+    onProgress({ type: 'card', card: { kind: 'result', title: query, subtitle: 'Opened YouTube search — connect Google to play the top result directly' } });
+    return;
+  }
+  const v = await google.searchVideo(query);
+  await browserController.navigate(v.url);
+  onProgress({ type: 'card', card: { kind: 'result', title: v.title, subtitle: `${v.channel} · opened on YouTube` } });
+  say(`Playing ${v.title}.`);
+}
 const say = (text) => { if (speakReplies) systemController.speak(text).catch(() => {}); };
 
 class ActionExecutor {
@@ -130,6 +143,70 @@ class ActionExecutor {
               say(`Playing ${first && found.kind === 'track' ? `${first.name} by ${first.artist}` : found.title}.`);
             }
             onProgress({ type: 'card', card: { ...found, kind: 'player', mediaKind: found.kind, idle: step.autoplay === false } });
+            break;
+          }
+
+          case 'google_connect': {
+            onProgress({ type: 'status', message: 'Approve Fuli in the Google page that just opened…' });
+            const wins = electron().BrowserWindow.getAllWindows();
+            wins.forEach((w) => w.hide()); // Fuli floats above everything, so move aside for the login page
+            let name;
+            try { ({ name } = await google.connect()); } finally { wins.forEach((w) => { w.show(); w.focus(); }); }
+            onProgress({ type: 'card', card: { kind: 'result', title: `Connected${name ? ` as ${name}` : ''}`, subtitle: 'Calendar, Gmail and YouTube are ready' } });
+            say('Google is connected.');
+            break;
+          }
+
+          case 'google_disconnect':
+            await google.disconnect();
+            onProgress({ type: 'card', card: { kind: 'result', title: 'Google disconnected', subtitle: 'Fuli forgot your login' } });
+            break;
+
+          case 'calendar_list': {
+            const { label, range, events } = await google.listEvents(step.range);
+            const items = events.map((e) => ({
+              label: range === 'week' ? `${e.day} · ${e.time}` : e.time, text: e.title, meta: e.location, url: e.url
+            }));
+            onProgress({ type: 'card', card: { kind: 'list', title: label, hint: 'Click to open in Calendar', empty: range === 'next' ? 'Nothing coming up.' : 'Nothing on the calendar. Enjoy the free time.', items } });
+            say(events.length ? `You have ${events.length} event${events.length === 1 ? '' : 's'}. First up: ${events[0].title} at ${events[0].time}.` : 'Nothing on your calendar.');
+            break;
+          }
+
+          case 'calendar_add': {
+            const ev = await google.quickAdd(step.text);
+            onProgress({ type: 'card', card: { kind: 'result', title: ev.title, subtitle: `Added to your calendar · ${ev.when}` } });
+            say(`Added ${ev.title}.`);
+            break;
+          }
+
+          case 'calendar_delete': {
+            const found = await google.findEvents(step.text);
+            if (!found.length) throw new Error(`No upcoming event matches "${step.text}"`);
+            onProgress({ type: 'card', card: { kind: 'delete', title: found.length === 1 ? 'Delete this event?' : `Which one should I delete? (${found.length} matches)`, items: found } });
+            break;
+          }
+
+          case 'gmail_unread': {
+            const mails = await google.unreadMail(step.from);
+            onProgress({ type: 'card', card: { kind: 'list', title: step.from ? `Unread from ${step.from}` : 'Unread email', hint: 'Click to open in Gmail', empty: 'No unread email.', items: mails.map((m) => ({ label: m.from, text: m.subject, ts: m.ts, url: m.url })) } });
+            say(mails.length ? `You have ${mails.length} unread email${mails.length === 1 ? '' : 's'}${mails.length ? `. The latest is from ${mails[0].from}: ${mails[0].subject}.` : ''}` : 'No unread email.');
+            break;
+          }
+
+          case 'gmail_latest': {
+            const m = await google.latestMail();
+            onProgress({ type: 'card', card: { kind: 'mail', ...m } });
+            say(`Your latest email is from ${m.from}: ${m.subject}.`);
+            break;
+          }
+
+          case 'youtube_play':
+            await youtubePlay(step.query, onProgress);
+            break;
+
+          case 'youtube_playlists': {
+            const items = await google.myPlaylists();
+            onProgress({ type: 'card', card: { kind: 'list', title: 'Your YouTube playlists', hint: 'Click to open', empty: 'No playlists on this YouTube account.', items: items.map((p) => ({ label: `${p.count}`, text: p.title, url: p.url })) } });
             break;
           }
 

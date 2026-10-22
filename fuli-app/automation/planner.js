@@ -1,5 +1,6 @@
 const path = require('path');
 const spotify = require('./spotify');
+const google = require('./google');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
 const GEMINI_API_KEY = process.env.GOOGLE_API_KEY;
@@ -97,6 +98,8 @@ Supported ACTION_TYPEs:
 18. "system_command"
     Parameters: { "command": "lock" | "sleep" | "dark-mode-on" | "dark-mode-off" | "dark-mode-toggle" | "empty-trash" | "caffeinate-on" | "caffeinate-off" | "unmute" | "volume-up" | "volume-down" }
 
+18b. Google (Calendar / Gmail / YouTube): "calendar_list" { range: today|tomorrow|week|next }, "calendar_add" { text }, "calendar_delete" { text }, "gmail_unread" { from }, "gmail_latest", "youtube_play" { query }, "youtube_playlists", "google_connect", "google_disconnect".
+
 19. "clipboard_show" (no params) — show clipboard history. "clipboard_clear" — clear it.
 
 20. "snippet_save" { "name", "text" }, "snippet_paste" { "name" }, "snippet_list" {}, "snippet_delete" { "name" }
@@ -185,6 +188,64 @@ function tryFeaturePath(p, original) {
     if (/^(?:previous|last|go back(?: a)?)(?:\s+song|\s+track)?$/.test(p)) {
       return plan('Previous track', { description: 'Previous track', action: 'system_media', command: 'previous' });
     }
+  }
+
+  // ── Google (Calendar, Gmail, YouTube) ──
+  if (/^(?:connect|link|log ?in|sign ?in|log in to|sign in to)\s+(?:to\s+|with\s+|my\s+)?google(?:\s+account)?$/.test(p) || /^google (?:login|log in|sign in|connect)$/.test(p)) {
+    return plan('Connect Google', { description: 'Sign in to Google in your browser', action: 'google_connect' });
+  }
+  if (/^(?:disconnect|log ?out of|sign out of|unlink)\s+(?:from\s+)?google$/.test(p)) {
+    return plan('Disconnect Google', { description: 'Disconnect Google', action: 'google_disconnect' });
+  }
+
+  const dayWord = (w) => (/tomorrow/.test(w || '') ? 'tomorrow' : /week/.test(w || '') ? 'week' : 'today');
+  const calList = p.match(/^(?:what(?:'?s| is| do i have| have i got)|show(?: me)?|list|check|read)\s+(?:on\s+)?(?:my\s+)?(?:calendar|schedule|agenda)(?:\s+(?:for\s+)?(today|tomorrow|tonight|this week))?$/)
+    || p.match(/^(?:what(?:'?s| is| do i have| have i got)|show(?: me)?)\s+(?:on\s+)?(?:for\s+)?(today|tomorrow|tonight|this week)$/)
+    || p.match(/^(?:my\s+)?(?:calendar|schedule|agenda)(?:\s+(today|tomorrow|tonight|this week))?$/);
+  if (calList) return plan('Check your calendar', { description: 'Load your calendar', action: 'calendar_list', range: dayWord(calList[1]) });
+  if (/^(?:when(?:'?s| is)|what(?:'?s| is))\s+my\s+next\s+(?:meeting|event|appointment)$|^next (?:meeting|event)$/.test(p)) {
+    return plan('Find your next event', { description: 'Find your next event', action: 'calendar_list', range: 'next' });
+  }
+  const calAdd = original.match(/^(?:add|schedule|put|book|create|set up)\s+(.+?)(?:\s+(?:to|on|in)\s+(?:my\s+)?calendar)?$/i);
+  if (calAdd && (/\b(?:to|on|in)\s+(?:my\s+)?calendar$/i.test(original) || /\b(?:at\s+\d|\d\s*(?:am|pm)\b|tomorrow|tonight|today|next\s+\w+|on\s+(?:mon|tue|wed|thu|fri|sat|sun)\w*)/i.test(calAdd[1]))
+      && !/^(?:a\s+)?(?:snippet|note|reminder)\b/i.test(calAdd[1])) {
+    return plan(`Add to calendar: ${calAdd[1]}`, { description: `Add "${calAdd[1]}" to your calendar`, action: 'calendar_add', text: calAdd[1].trim() });
+  }
+
+  const calDel = original.match(/^(?:delete|remove|cancel|clear)\s+(?:my\s+|the\s+)?(.+?)(?:\s+(?:from|off|on|in)\s+(?:my\s+)?calendar)?$/i);
+  if (calDel) {
+    const what = calDel[1].trim();
+    const hint = /\b(?:from|off|on|in)\s+(?:my\s+)?calendar$/i.test(original) || /\b(?:meeting|event|appointment|call|dinner|lunch|standup)\b/i.test(what)
+      || /\b(?:\d\s*(?:am|pm)|tomorrow|tonight|today)\b/i.test(what);
+    if ((hint || google.isConnected()) && !/\b(?:snippet|note|clipboard|playlist|file|history|trash|tab|window|app)\b/i.test(what)) {
+      return plan(`Delete from calendar: ${what}`, { description: `Find "${what}" on your calendar`, action: 'calendar_delete', text: what });
+    }
+  }
+
+  const mailLatest = p.match(/^(?:read|open|show)\s+(?:me\s+)?(?:my\s+)?(?:latest|last|newest|most recent)\s+(?:e-?mail|mail)$/);
+  if (mailLatest) return plan('Read your latest email', { description: 'Open your latest email', action: 'gmail_latest' });
+  const mailUnread = p.match(/^(?:any\s+|check\s+|show\s+|list\s+|read\s+)?(?:me\s+)?(?:my\s+)?(?:new\s+|unread\s+)?(?:e-?mails?|inbox|mail)(?:\s+from\s+(.+))?$/)
+    || p.match(/^(?:any\s+)?unread(?:\s+(?:from|by)\s+(.+))?$/);
+  if (mailUnread) {
+    const from = unquote(mailUnread[1] || '');
+    return plan(from ? `Unread email from ${from}` : 'Check unread email', { description: from ? `Find unread email from ${from}` : 'Check unread email', action: 'gmail_unread', from });
+  }
+
+  // "search / find / open ... on YouTube" shows the results page; only "play / watch" opens the top video
+  const ytSearch = p.match(/^(?:search|find|look up|look for)\s+(?:for\s+)?(.+?)\s+(?:on|in)\s+youtube$/)
+    || p.match(/^(?:search|find)\s+youtube\s+(?:for\s+)?(.+)$/) || p.match(/^youtube\s+search\s+(?:for\s+)?(.+)$/)
+    || p.match(/^open\s+(.+?)\s+(?:on|in)\s+youtube$/) || p.match(/^youtube\s+(?!playlists?$)(.+)$/);
+  if (ytSearch) {
+    const query = unquote(ytSearch[1]);
+    return plan(`Search YouTube for ${query}`, { description: `Search YouTube for "${query}"`, action: 'browser_navigate', url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}` });
+  }
+  const ytPlay = p.match(/^(?:play|watch)\s+(.+?)\s+(?:on|in)\s+youtube$/) || p.match(/^watch\s+(?!(?:netflix|youtube|prime|hotstar|tv)\b)(.+)$/);
+  if (ytPlay) {
+    const query = unquote(ytPlay[1]);
+    return plan(`Play ${query} on YouTube`, { description: `Find "${query}" on YouTube`, action: 'youtube_play', query });
+  }
+  if (/^(?:show|open|list)\s+(?:me\s+)?(?:my\s+)?youtube\s+playlists?$|^my\s+youtube\s+playlists?$/.test(p)) {
+    return plan('Show your YouTube playlists', { description: 'Load your YouTube playlists', action: 'youtube_playlists' });
   }
 
   // ── Calculator & conversions ──

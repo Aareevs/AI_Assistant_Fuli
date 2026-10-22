@@ -305,6 +305,10 @@ function showCard(card) {
     setExpanded(true, 160);
   } else if (card.kind === 'list') {
     renderListCard(card);
+  } else if (card.kind === 'mail') {
+    renderMail(card);
+  } else if (card.kind === 'delete') {
+    renderDeleteEvents(card);
   } else if (card.kind === 'playlists') {
     playlistsCache = card;
     renderPlaylists(card);
@@ -329,10 +333,11 @@ function renderListCard(card) {
     const row = el('div', 'rc-row');
     if (item.label) row.appendChild(el('span', 'rc-row-label', item.label));
     row.appendChild(el('span', 'rc-row-text', item.text.replace(/\s+/g, ' ')));
-    const meta = el('span', 'rc-row-meta', item.ts ? relTime(item.ts) : '');
+    const meta = el('span', 'rc-row-meta', item.meta || (item.ts ? relTime(item.ts) : ''));
     row.appendChild(meta);
     row.title = item.text;
     row.addEventListener('click', async () => {
+      if (item.url) return window.fuliAPI.openUrl(item.url);
       await window.fuliAPI.copyText(item.text);
       row.classList.add('copied');
       meta.textContent = 'Copied';
@@ -341,6 +346,54 @@ function renderListCard(card) {
   });
   resultCard.appendChild(list);
   setExpanded(true, Math.min(150 + Math.max(card.items.length, 1) * 36, 420));
+}
+
+function renderDeleteEvents(card) {
+  const head = el('div', 'rc-list-head');
+  head.appendChild(el('span', 'rc-list-title', card.title));
+  head.appendChild(el('span', 'rc-list-hint', 'Nothing is deleted until you click Delete'));
+  resultCard.appendChild(head);
+  const list = el('div', 'player-tracks');
+  list.style.borderTop = 'none';
+  list.style.marginTop = '0';
+  card.items.forEach((ev) => {
+    const row = el('div', 'pt-row del-row');
+    const text = el('div', 'pt-text');
+    text.appendChild(el('div', 'pt-name', ev.title));
+    text.appendChild(el('div', 'pt-artist', ev.when));
+    row.appendChild(text);
+    const btn = el('button', 'cp-btn del-btn', 'Delete');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = 'Deleting…';
+      const r = await window.fuliAPI.google('delete-event', ev.id);
+      if (r && r.ok) {
+        btn.textContent = 'Deleted ✓';
+        row.classList.add('deleted');
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'Delete';
+        statusText.textContent = (r && r.error) || 'Could not delete that event';
+      }
+    });
+    row.appendChild(btn);
+    list.appendChild(row);
+  });
+  resultCard.appendChild(list);
+  setExpanded(true, Math.min(150 + card.items.length * 52, 420));
+}
+
+function renderMail(card) {
+  const head = el('div', 'rc-list-head');
+  head.appendChild(el('span', 'rc-list-title', card.subject));
+  head.appendChild(el('span', 'rc-list-hint', `${card.from} · ${relTime(card.ts)}`));
+  resultCard.appendChild(head);
+  const body = el('div', 'mail-body', card.body || '(No text content)');
+  resultCard.appendChild(body);
+  const open = el('button', 'cp-btn secondary mail-open', 'Open in Gmail');
+  open.addEventListener('click', () => window.fuliAPI.openUrl(card.url));
+  resultCard.appendChild(open);
+  setExpanded(true, 330);
 }
 
 function renderPlaylists(card) {
@@ -541,45 +594,83 @@ function closeConnectors() {
   promptInput.focus();
 }
 
-async function renderConnectors(busy, error) {
-  const res = await window.fuliAPI.spotify('status');
-  const st = res && res.ok ? res.data : { installed: false, connected: false };
+const GOOGLE_ICON = '<svg width="22" height="22" viewBox="0 0 24 24"><path fill="#4285F4" d="M23 12.3c0-.8-.1-1.5-.2-2.2H12v4.2h6.2a5.3 5.3 0 0 1-2.3 3.5v2.9h3.7c2.2-2 3.4-5 3.4-8.4z"/><path fill="#34A853" d="M12 24c3.1 0 5.7-1 7.6-2.8l-3.7-2.9c-1 .7-2.3 1.1-3.9 1.1-3 0-5.5-2-6.4-4.8H1.8v3A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.6 14.6a7.2 7.2 0 0 1 0-4.6V7H1.8a12 12 0 0 0 0 10.8l3.8-3.2z"/><path fill="#EA4335" d="M12 4.8c1.7 0 3.2.6 4.4 1.7l3.3-3.3A12 12 0 0 0 1.8 7l3.8 3c.9-2.8 3.4-5.2 6.4-5.2z"/></svg>';
+
+// One row per connector: { icon, name, sub, ok, button: { label, secondary, disabled, onClick } | null }
+function connectorRow(c) {
+  const row = el('div', 'cp-row');
+  const icon = el('div', 'cp-icon');
+  icon.innerHTML = c.icon;
+  row.appendChild(icon);
+  const text = el('div', 'cp-text');
+  text.appendChild(el('div', 'cp-name', c.name));
+  text.appendChild(el('div', 'cp-sub' + (c.ok ? ' ok' : ''), c.sub));
+  row.appendChild(text);
+  if (c.button) {
+    const btn = el('button', 'cp-btn' + (c.button.secondary ? ' secondary' : ''), c.button.label);
+    btn.disabled = !!c.button.disabled;
+    btn.addEventListener('click', c.button.onClick);
+    row.appendChild(btn);
+  }
+  return row;
+}
+
+let connectorBusy = null;   // 'spotify' | 'google' while waiting on a browser login
+let connectorError = null;
+
+async function renderConnectors() {
+  const [sp, gg] = await Promise.all([window.fuliAPI.spotify('status'), window.fuliAPI.google('status')]);
+  const st = sp && sp.ok ? sp.data : { installed: false, connected: false };
+  const gs = gg && gg.ok ? gg.data : { configured: false, connected: false };
   connectorsPanel.innerHTML = '';
   connectorsPanel.appendChild(el('div', 'cp-title', 'Connectors'));
 
-  const row = el('div', 'cp-row');
-  const icon = el('div', 'cp-icon');
-  icon.innerHTML = SPOTIFY_ICON;
-  row.appendChild(icon);
+  const connect = (id, call) => async () => {
+    connectorBusy = id;
+    connectorError = null;
+    renderConnectors();
+    const r = await call();
+    connectorBusy = null;
+    if (r && !r.ok) connectorError = r.error;
+    renderConnectors();
+  };
 
-  const text = el('div', 'cp-text');
-  text.appendChild(el('div', 'cp-name', 'Spotify'));
-  const sub = !st.installed ? 'Install the Spotify app to use this'
-    : busy ? 'Approve Fuli in your browser…'
-    : st.needsReconnect ? 'Reconnect once to play music inside Fuli'
-    : st.connected ? `Connected${st.name ? ` as ${st.name}` : ''}`
-    : 'Play your playlists and see their songs';
-  text.appendChild(el('div', 'cp-sub' + (st.connected && !st.needsReconnect && !busy ? ' ok' : ''), sub));
-  row.appendChild(text);
+  const rows = el('div', 'cp-rows');
+  rows.appendChild(connectorRow({
+    icon: SPOTIFY_ICON, name: 'Spotify',
+    sub: !st.installed ? 'Install the Spotify app to use this'
+      : connectorBusy === 'spotify' ? 'Approve Fuli in your browser…'
+      : st.needsReconnect ? 'Reconnect once to play music inside Fuli'
+      : st.connected ? `Connected${st.name ? ` as ${st.name}` : ''}`
+      : 'Play your playlists and see their songs',
+    ok: st.connected && !st.needsReconnect && connectorBusy !== 'spotify',
+    button: !st.installed ? null : {
+      label: connectorBusy === 'spotify' ? 'Waiting…' : st.needsReconnect ? 'Reconnect' : st.connected ? 'Disconnect' : 'Connect',
+      secondary: st.connected && !st.needsReconnect, disabled: connectorBusy === 'spotify',
+      onClick: st.connected && !st.needsReconnect
+        ? async () => { await window.fuliAPI.spotify('disconnect'); renderConnectors(); }
+        : connect('spotify', () => window.fuliAPI.spotify('connect'))
+    }
+  }));
+  rows.appendChild(connectorRow({
+    icon: GOOGLE_ICON, name: 'Google',
+    sub: !gs.configured ? 'Add your Google keys to .env — see the README'
+      : connectorBusy === 'google' ? 'Approve Fuli in your browser…'
+      : gs.connected ? `Connected${gs.name ? ` as ${gs.name}` : ''}`
+      : 'Calendar, Gmail and YouTube',
+    ok: gs.connected && connectorBusy !== 'google',
+    button: !gs.configured ? null : {
+      label: connectorBusy === 'google' ? 'Waiting…' : gs.connected ? 'Disconnect' : 'Connect',
+      secondary: gs.connected, disabled: connectorBusy === 'google',
+      onClick: gs.connected
+        ? async () => { await window.fuliAPI.google('disconnect'); renderConnectors(); }
+        : connect('google', () => window.fuliAPI.google('connect'))
+    }
+  }));
+  connectorsPanel.appendChild(rows);
 
-  if (st.installed) {
-    const btn = el('button', 'cp-btn' + (st.connected && !st.needsReconnect ? ' secondary' : ''), busy ? 'Waiting…' : st.needsReconnect ? 'Reconnect' : st.connected ? 'Disconnect' : 'Connect');
-    btn.disabled = !!busy;
-    btn.addEventListener('click', async () => {
-      if (st.connected && !st.needsReconnect) {
-        await window.fuliAPI.spotify('disconnect');
-        renderConnectors();
-      } else {
-        renderConnectors(true);
-        const r = await window.fuliAPI.spotify('connect');
-        renderConnectors(false, r && !r.ok ? r.error : null);
-      }
-    });
-    row.appendChild(btn);
-  }
-  connectorsPanel.appendChild(row);
-  if (error) connectorsPanel.appendChild(el('div', 'cp-error', error));
-  connectorsPanel.appendChild(el('div', 'cp-foot', 'Then just say “play …” or “open my … playlist”.'));
+  if (connectorError) connectorsPanel.appendChild(el('div', 'cp-error', connectorError));
+  connectorsPanel.appendChild(el('div', 'cp-foot', 'Try: “play …”, “what’s on today”, “any unread emails”, “play … on YouTube”.'));
   applyHeight();
 }
 
