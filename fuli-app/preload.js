@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('fuliAPI', {
-  submitPrompt: (prompt) => ipcRenderer.send('fuli:submit-prompt', prompt),
+  submitPrompt: (prompt, spoken = false) => ipcRenderer.send('fuli:submit-prompt', prompt, !!spoken),
   cancelTask: () => ipcRenderer.send('fuli:cancel-task'),
   hideWindow: () => ipcRenderer.send('fuli:hide-window'),
   closeApp: () => ipcRenderer.send('fuli:close-app'),

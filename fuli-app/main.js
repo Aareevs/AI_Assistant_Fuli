@@ -483,7 +483,7 @@ app.on('will-quit', () => {
 });
 
 // IPC Handlers
-ipcMain.on('fuli:submit-prompt', async (event, prompt) => {
+ipcMain.on('fuli:submit-prompt', async (event, prompt, spoken) => {
   if (!prompt || !prompt.trim()) return;
 
   isTaskRunning = true;
@@ -492,7 +492,7 @@ ipcMain.on('fuli:submit-prompt', async (event, prompt) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('fuli:progress', progress);
       }
-    });
+    }, { spoken: !!spoken });
 
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('fuli:complete', result);

@@ -49,7 +49,7 @@ if (window.fuliAPI && window.fuliAPI.onSetPromptAndRun) {
   window.fuliAPI.onSetPromptAndRun((prompt) => {
     promptInput.value = prompt;
     if (micBtn) micBtn.classList.remove('listening');
-    startExecution();
+    startExecution(true); // came in over voice
   });
 }
 
@@ -133,7 +133,8 @@ function updateStepStatus(stepId, state) {
   }
 }
 
-function startExecution() {
+// spoken = the command came from voice, so Fuli may answer out loud; typed commands stay silent
+function startExecution(spoken = false) {
   const prompt = promptInput.value.trim();
   if (!prompt || isRunning) return;
 
@@ -149,7 +150,7 @@ function startExecution() {
   stepsList.innerHTML = '';
   setExpanded(true, 150);
 
-  window.fuliAPI.submitPrompt(prompt);
+  window.fuliAPI.submitPrompt(prompt, spoken === true);
 }
 
 function stopExecution() {
@@ -169,7 +170,7 @@ function resetUIState() {
 }
 
 // Event Listeners
-submitBtn.addEventListener('click', startExecution);
+submitBtn.addEventListener('click', () => startExecution(false));
 cancelBtn.addEventListener('click', stopExecution);
 if (closeBtn) {
   closeBtn.addEventListener('click', () => {

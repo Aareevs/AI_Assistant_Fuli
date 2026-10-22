@@ -6,7 +6,10 @@ const extras = require('./extras');
 
 // Electron-only helpers, loaded lazily so the executor still runs under plain Node tests
 const electron = () => require('electron');
-const say = (text) => { systemController.speak(text).catch(() => {}); };
+// Fuli only talks back when the command itself was spoken; typed commands stay silent
+let speakReplies = false;
+
+const say = (text) => { if (speakReplies) systemController.speak(text).catch(() => {}); };
 
 class ActionExecutor {
   constructor() {
@@ -18,13 +21,25 @@ class ActionExecutor {
     this.cancelled = true;
   }
 
-  async executeTask(userPrompt, onProgress = () => {}) {
+  async executeTask(userPrompt, onProgress = () => {}, { spoken = false } = {}) {
     this.cancelled = false;
+    speakReplies = !!spoken;
 
     try {
       // 1. Plan the action sequence
       onProgress({ type: 'status', message: 'Fuli is planning your actions...' });
       const plan = await planActions(userPrompt);
+
+      if (!spoken) {
+        // Typed command: drop the spoken-confirmation steps. If that's all there was (e.g. an API-quota
+        // notice), show the text on screen instead.
+        const said = plan.steps.filter((s) => s.action === 'speak').map((s) => s.text).filter(Boolean);
+        plan.steps = plan.steps.filter((s) => s.action !== 'speak');
+        if (!plan.steps.length && said.length) {
+          onProgress({ type: 'card', card: { kind: 'result', title: said.join(' '), subtitle: 'Fuli' } });
+          return { success: true, summary: plan.summary };
+        }
+      }
 
       if (this.cancelled) {
         onProgress({ type: 'cancelled', message: 'Task cancelled by user.' });
@@ -220,7 +235,7 @@ class ActionExecutor {
             break;
 
           case 'speak':
-            await systemController.speak(step.text);
+            if (speakReplies) await systemController.speak(step.text);
             break;
 
           default:
