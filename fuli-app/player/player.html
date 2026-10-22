@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Fuli Player</title></head>
+<body>
+<script src="https://sdk.scdn.co/spotify-player.js"></script>
+<script>
+// Hidden page that turns Fuli into a Spotify Connect device (Spotify Web Playback SDK).
+const bridge = window.fuliPlayerBridge;
+
+async function drmAvailable() {
+  try {
+    await navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{
+      initDataTypes: ['cenc'],
+      audioCapabilities: [{ contentType: 'audio/mp4;codecs="mp4a.40.2"' }]
+    }]);
+    return true;
+  } catch (e) { return false; }
+}
+
+window.onSpotifyWebPlaybackSDKReady = async () => {
+  if (!(await drmAvailable())) { bridge.emit('error', { kind: 'drm', message: 'Widevine is not available in this build' }); return; }
+
+  const player = new Spotify.Player({
+    name: 'Fuli',
+    getOAuthToken: (cb) => bridge.getToken().then(cb),
+    volume: 0.8
+  });
+
+  player.addListener('ready', ({ device_id }) => bridge.emit('ready', { deviceId: device_id }));
+  player.addListener('not_ready', () => bridge.emit('not_ready', {}));
+  player.addListener('player_state_changed', (s) => bridge.emit('state', s));
+  for (const kind of ['initialization_error', 'authentication_error', 'account_error', 'playback_error']) {
+    player.addListener(kind, ({ message }) => bridge.emit('error', { kind, message }));
+  }
+
+  bridge.onCommand(async (cmd, arg) => {
+    if (cmd === 'toggle') player.togglePlay();
+    else if (cmd === 'play') player.resume();
+    else if (cmd === 'pause') player.pause();
+    else if (cmd === 'next') player.nextTrack();
+    else if (cmd === 'previous') player.previousTrack();
+    else if (cmd === 'seek') player.seek(Math.round(Number(arg) * 1000));
+    else if (cmd === 'volume') player.setVolume(Number(arg));
+    else if (cmd === 'activate') player.activateElement();
+  });
+
+  const ok = await player.connect();
+  if (!ok) bridge.emit('error', { kind: 'connect', message: 'Could not connect the Fuli player' });
+};
+</script>
+</body></html>

@@ -81,7 +81,12 @@ if (targetPlatform === 'win32') {
   // ==========================================
   // macOS Build (darwin)
   // ==========================================
-  const packCmd = `"${packagerBin}" "${appDir}" Fuli --platform=darwin --arch=${targetArch} --app-bundle-id=com.aareev.fuli --app-version=1.0.0 --overwrite --out="${distDir}"`;
+  // Widevine-enabled Electron (castlabs) so Spotify can play inside Fuli. Zip lives in <repo>/.electron-zip
+  const electronPkg = require(path.join(appDir, 'node_modules', 'electron', 'package.json'));
+  const zipDir = path.join(rootDir, '.electron-zip');
+  const castlabsFlags = String(electronPkg.version).includes('wvcus') && fs.existsSync(zipDir)
+    ? `--electron-version="${electronPkg.version}" --electron-zip-dir="${zipDir}"` : '';
+  const packCmd = `"${packagerBin}" "${appDir}" Fuli --platform=darwin --arch=${targetArch} ${castlabsFlags} --app-bundle-id=com.aareev.fuli --app-version=1.0.0 --overwrite --out="${distDir}"`;
   console.log(`Running: ${packCmd}`);
   execSync(packCmd, { stdio: 'inherit' });
 
@@ -111,6 +116,18 @@ if (targetPlatform === 'win32') {
       console.log('✓ Set CFBundle metadata & LSUIElement: true in Info.plist');
     } catch (e) {
       console.warn('PlistBuddy update note:', e.message);
+    }
+
+    // castlabs VMP signature: lets Widevine (and so Spotify's in-app player) trust this build.
+    // Needs a free EVS account — see README ("Play Spotify inside Fuli"). Skipped quietly if not set up.
+    const evsPython = path.join(rootDir, '.evs-venv', 'bin', 'python');
+    if (fs.existsSync(evsPython)) {
+      try {
+        execSync(`"${evsPython}" -m castlabs_evs.vmp -n sign-pkg "${path.dirname(bundlePath)}"`, { stdio: 'pipe', input: '' });
+        console.log('✓ VMP-signed bundle (castlabs EVS)');
+      } catch (e) {
+        console.warn('VMP signing skipped — run `npm run evs:signup` once to enable in-app Spotify audio.');
+      }
     }
 
     const appDest = '/Applications/Fuli.app';

@@ -23,3 +23,5 @@ __pycache__/
 
 # Build Output
 dist/
+.electron-zip/
+.evs-venv/

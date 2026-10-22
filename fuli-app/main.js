@@ -33,6 +33,7 @@ for (const envPath of envCandidates) {
 const { actionExecutor } = require('./automation/executor');
 const spotify = require('./automation/spotify');
 const extras = require('./automation/extras');
+const player = require('./automation/player');
 const http = require('http');
 
 const isWin = process.platform === 'win32';
@@ -389,7 +390,15 @@ function startVoiceOperator() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Widevine (castlabs Electron build) — needed for Spotify's in-app player; absent on stock Electron
+  try {
+    const { components } = require('electron');
+    if (components && components.whenReady) await components.whenReady();
+  } catch (e) {
+    logFuli(`Widevine component notice: ${e && e.message ? e.message : e}`);
+  }
+
   if (process.platform === 'darwin' && app.dock) {
     try {
       app.dock.hide();
@@ -409,6 +418,10 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   startLocalCommandServer();
+
+  // In-app Spotify playback (only starts when Spotify is connected with streaming permission)
+  spotify.setEngine(player);
+  player.start();
 
   // Clipboard history: sample the clipboard and keep recent text entries
   setInterval(() => {
@@ -524,10 +537,12 @@ ipcMain.handle('fuli:spotify', async (event, cmd, arg) => {
     if (cmd === 'state') return { ok: true, data: await spotify.state() };
     if (cmd === 'status') return { ok: true, data: spotify.status() };
     if (cmd === 'playlist') return { ok: true, data: await spotify.openPlaylist(arg) };
+    if (cmd === 'disconnect') { spotify.disconnect(); player.stop(); return { ok: true, data: spotify.status() }; }
     if (cmd === 'connect') {
       // Step out of the way (Fuli floats above everything) while the Spotify login page is in the browser
       isTaskRunning = true;
       hideWindow();
+      try { await spotify.connect(); player.stop(); player.start(); } finally { isTaskRunning = false; showWindow(); }
       return { ok: true, data: spotify.status() };
     }
     await spotify.control(cmd, arg);
